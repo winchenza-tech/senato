@@ -270,7 +270,7 @@ async def main():
     
     # Asparagas motoru 
     target_hours = '1,2,3,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,0'
-    scheduler.add_job(send_asparagas_haber, 'cron', hour=target_hours, minute=45, args=[application])
+    scheduler.add_job(send_asparagas_haber, 'cron', hour=target_hours, minute=15, args=[application])
     
     # Auto-Roast motoru her 2 saatte bir çalışacak şekilde ayarlandı
     scheduler.add_job(auto_roast, 'interval', hours=2, args=[application])
