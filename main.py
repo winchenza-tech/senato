@@ -276,6 +276,9 @@ async def main():
     
     scheduler.start()
 
+    # YENİ EKLENEN KISIM: Yabancılar /start yazarsa doğrudan reject_private tetiklenir
+    application.add_handler(CommandHandler("start", reject_private, filters=filters.ChatType.PRIVATE & (~filters.User(ADMIN_ID))))
+
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (~filters.User(ADMIN_ID)), reject_private))
     application.add_handler(MessageHandler(filters.ChatType.GROUPS & (~filters.Chat(chat_id=AUTHORIZED_GROUP_ID)), reject_unauthorized_group))
 
