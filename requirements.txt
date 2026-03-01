@@ -4,7 +4,3 @@ python-telegram-bot
 google-genai
 APScheduler
 pytz
-
-
-
--1001506019626
