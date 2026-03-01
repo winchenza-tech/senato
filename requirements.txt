@@ -1,0 +1,10 @@
+nest_asyncio
+Flask
+python-telegram-bot
+google-genai
+APScheduler
+pytz
+
+
+
+-1001506019626
