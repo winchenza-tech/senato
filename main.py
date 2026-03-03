@@ -253,7 +253,7 @@ async def tarot_command(update, context):
     Kullanıcı için 3 kartlık Tarot falı yorumla.
     Kartlar: 1. Kart (Geçmiş): {secilenler[0]}, 2. Kart (Şimdi): {secilenler[1]}, 3. Kart (Gelecek): {secilenler[2]}.
     Bu kartların anlamlarını ve kombinasyonlarını mistik, hafif gizemli ve etkileyici bir dille yorumla.
-    Toplam maksimum 80 kelime kullan.
+    Toplam maksimum 110 kelime kullan. * SİMGESİ kullanma. Kart isimlerini söyledikten sonra kartı diye belirt. örneğin 'gelecekteki ölüm' demek yerine 'gelecekteki ölüm kartı' gibi. anlaşılır biraz samimi hafif dil kullan
     """
     
     try:
