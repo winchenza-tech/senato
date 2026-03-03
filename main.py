@@ -149,7 +149,6 @@ async def comment_command(update, context):
     
     try:
         if target.photo:
-            # Görsel varsa yapay zekaya sadece "yazdığına bak" değil, "görsele bak" demeliyiz:
             vision_prompt = roast_prompt + " DİKKAT: Hedef sana bir GÖRSEL gönderdi. Bu görseli detaylıca analiz et ve eleştirini/dalganı tamamen bu görseldeki detaylar ve nesneler üzerinden yap!"
             
             photo_file = await target.photo[-1].get_file()
@@ -294,7 +293,7 @@ async def tarot_command(update, context):
     except:
         await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
-# --- YENİ EKLENEN QUOTE KOMUTU ---
+# --- QUOTE KOMUTU ---
 async def quote_command(update, context):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
     
@@ -316,6 +315,31 @@ async def quote_command(update, context):
     except:
         await update.message.reply_text("Şu an filozoflara ulaşılamıyor.")
 
+# --- RASTACA KOMUTU (GÜNCELLENDİ) ---
+async def rastaca_command(update, context):
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
+    
+    target = update.message.reply_to_message
+    target_text = target.text or target.caption
+    
+    if not target_text:
+        await update.message.reply_text("Sadece yazılı mesajları sokak ağzına çevirebilirim hacı.")
+        return
+
+    prompt = f"""GÖREV: Aşağıdaki metni Türk sokak ağzına, 'keko', serseri, semt çocuğu ve gangster jargonuna çevir. Aşırı abartılı, argolu bir dille yeniden yaz. Özellikle cümle sonlarına veya mesajın sonuna 'aq', 'amk', 'ak' gibi kısaltmaları kesinlikle ekle.
+    Çevrilecek Metin: "{target_text}"
+    Sadece çeviriyi ver, başka hiçbir açıklama yapma."""
+    
+    try:
+        res = await asyncio.to_thread(
+            client.models.generate_content,
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')])
+        )
+        await target.reply_text(f"🚬 {res.text}")
+    except Exception as e:
+        print(f"Rastaca hatası: {e}")
 
 # --- 5. ANA ÇALIŞTIRICI ---
 
@@ -341,7 +365,8 @@ async def main():
     application.add_handler(CommandHandler("getir", getir_command))
     application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
     application.add_handler(CommandHandler("tarotbak", tarot_command))
-    application.add_handler(CommandHandler("quote", quote_command)) # QUOTE BURAYA EKLENDİ
+    application.add_handler(CommandHandler("quote", quote_command))
+    application.add_handler(CommandHandler("rastaca", rastaca_command)) # RASTACA BURAYA EKLENDİ
     
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/son(100|200)'), summarize_command))
     application.add_handler(MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO) & (~filters.COMMAND), record_message))
