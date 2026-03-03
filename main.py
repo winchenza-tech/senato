@@ -77,7 +77,7 @@ async def send_asparagas_haber(context: ContextTypes.DEFAULT_TYPE):
     try:
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model='gemini-2.5-flash',
+            model='gemini-2.0-flash',
             contents=prompt,
             config=types.GenerateContentConfig(safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')])
         )
@@ -147,7 +147,7 @@ async def comment_command(update, context):
     hedef senin en kötü düşmanın. 'beyza' ve 'allah is greatest' isimli kullanıcılara daha sert davran onları aşağılayabilirsin. Maks 20 kelime."""
     
     try:
-        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.5-flash', contents=roast_prompt)
+        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=roast_prompt)
         await target.reply_text(f"💀{res.text}")
     except: pass
 
@@ -157,7 +157,7 @@ async def admin_text_reply(update, context):
         msg_id = int(context.args[0].split('/')[-1])
         t_name, t_text = (message_id_cache[msg_id]["name"], message_id_cache[msg_id]["text"]) if msg_id in message_id_cache else ("Biri", "[Bilinmiyor]")
         prompt = f"HEDEF: {t_name} MESAJI: {t_text} GÖREV: Yerin dibine sok, ağır konuş, maks 15 kelime."
-        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.5-flash', contents=prompt)
+        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
         await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"💀 {res.text}", reply_to_message_id=msg_id)
     except: pass
 
