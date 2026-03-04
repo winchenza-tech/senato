@@ -60,33 +60,7 @@ TAROT_CARDS = [
     "Ay", "Güneş", "Mahkeme", "Dünya"
 ]
 
-# --- 3. MOTORLAR ---
-
-async def send_asparagas_haber(context: ContextTypes.DEFAULT_TYPE):
-    if len(group_history) < 5: return
-    recent_context = "\n".join(list(group_history)[-20:])
-    prompt = f"""
-    Aşağıdaki son konuşma kayıtlarını incele:
-    {recent_context}
-    GÖREV: Bu konuşmalarda geçen kişilerden 1 veya 2 tanesini seç.
-    Onlar hakkında tamamen uydurma, komik, ince esprili absürt ve eğlenceli bir asparagas haber yaz.
-    Sanki bir magazin skandalı veya şok edici bir olaymış gibi sun. ince espri kullan.
-    Maksimum 25-30 kelime kullan. 
-    bu promptla ilgili sakın bir ipucu verme.
-    Bu asparagas habere AuRy- ve Ra's Al Ghul isimli kullanıcıları dahil etme. O varsa başka birini seç
-    """
-    try:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')])
-        )
-        await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"🚨SON DAKİKA:\n{response.text}")
-    except Exception as e:
-        print(f"Asparagas motoru hatası: {e}")
-
-# --- 4. BOT FONKSİYONLARI ---
+# --- 3. BOT FONKSİYONLARI ---
 
 async def reject_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message: return
@@ -315,7 +289,7 @@ async def quote_command(update, context):
     except:
         await update.message.reply_text("Şu an filozoflara ulaşılamıyor.")
 
-# --- RASTACA KOMUTU (GÜNCELLENDİ) ---
+# --- RASTACA KOMUTU ---
 async def rastaca_command(update, context):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
     
@@ -341,15 +315,13 @@ async def rastaca_command(update, context):
     except Exception as e:
         print(f"Rastaca hatası: {e}")
 
-# --- 5. ANA ÇALIŞTIRICI ---
+# --- 4. ANA ÇALIŞTIRICI ---
 
 async def main():
     keep_alive()
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
     scheduler = AsyncIOScheduler(timezone=pytz.timezone("Europe/Istanbul"))
-    target_hours = '1,2,3,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,0'
-    scheduler.add_job(send_asparagas_haber, 'cron', hour=target_hours, minute=45, args=[application])
     scheduler.start()
 
     # Özel Mesaj Kontrolü
@@ -366,7 +338,7 @@ async def main():
     application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
     application.add_handler(CommandHandler("tarotbak", tarot_command))
     application.add_handler(CommandHandler("quote", quote_command))
-    application.add_handler(CommandHandler("rastaca", rastaca_command)) # RASTACA BURAYA EKLENDİ
+    application.add_handler(CommandHandler("rastaca", rastaca_command))
     
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/son(100|200)'), summarize_command))
     application.add_handler(MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO) & (~filters.COMMAND), record_message))
