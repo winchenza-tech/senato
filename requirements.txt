@@ -1,6 +1,7 @@
-nest_asyncio
-Flask
 python-telegram-bot
 google-genai
-APScheduler
+flask
+requests
+apscheduler
 pytz
+nest-asyncio
