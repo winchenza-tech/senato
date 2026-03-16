@@ -4,6 +4,8 @@ import datetime
 import os
 import random
 import io
+import re
+import requests
 from collections import deque
 from flask import Flask
 from threading import Thread
@@ -55,13 +57,19 @@ pending_replies = {}
 # Moda sohbet hafızası
 fashion_sessions = {} 
 
-# --- TAROT KARTLARI ---
+# --- TAROT VE BURÇ BİLGİLERİ ---
 TAROT_CARDS = [
     "Deli", "Büyücü", "Azize", "İmparatoriçe", "İmparator", "Aziz",
     "Aşıklar", "Savaş Arabası", "Güç", "Ermiş", "Kader Çarkı", "Adalet",
     "Asılan Adam", "Ölüm", "Denge", "Şeytan", "Yıkılan Kule", "Yıldız",
     "Ay", "Güneş", "Mahkeme", "Dünya"
 ]
+
+ZODIAC_EMOJIS = {
+    "koç": "♈", "boğa": "♉", "ikizler": "♊", "yengeç": "♋", "aslan": "♌", 
+    "başak": "♍", "terazi": "♎", "akrep": "♏", "yay": "♐", "oğlak": "♑", 
+    "kova": "♒", "balık": "♓"
+}
 
 # --- 3. BOT FONKSİYONLARI ---
 
@@ -233,7 +241,6 @@ async def summarize_command(update, context):
     status_msg = await update.message.reply_text("⏳ Zenithar mantığıyla dolduruluyor...")
     full_text = "\n".join(list(group_history)[-200:])
     
-    # SENİN ORİJİNAL ÖZET PROMPTUN
     prompt = f"""
     Aşağıdaki konuşmaları esprili, muzip, zekice laf sokmalı iğneleyici bir sivri dil kullanarak özetle. Özel kurallar:
     
@@ -262,7 +269,6 @@ async def tarot_command(update, context):
     status = await update.message.reply_text(f"🃏Kartlar karıştırılıyor...\n1. {secilenler[0]}\n2. {secilenler[1]}\n3. {secilenler[2]}")
     await asyncio.sleep(2)
     
-    # SENİN ORİJİNAL TAROT PROMPTUN
     prompt = f"Tarot: {', '.join(secilenler)} mistik biraz da samimi bir dille yorumla. Maks 100 kelime kullan. * sembolü kullanma. yorumda kartlardan bahsederken 'asılan adam' gibi değil asılan adam kartı gibi bahset yani tarot bilmeyen biri dahi anlayabilsin. geçmiş şimdi ve gelecek kartlarını 3 ayrı paragrafa böl."
     
     try:
@@ -279,7 +285,69 @@ async def quote_command(update, context):
         await update.message.reply_text(f"🖋 {res.text}")
     except: pass
 
-# --- EKLENEN ADMİN KOMUTLARI BURADAN BAŞLIYOR ---
+# --- EKLENEN KAHVE FALI FONKSİYONU ---
+async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo_obj = update.message.photo[-1] if update.message.photo else (update.message.reply_to_message.photo[-1] if update.message.reply_to_message and update.message.reply_to_message.photo else None)
+    if not photo_obj:
+        await update.message.reply_text("☕ Fal için fincan fotosu lazım canım.")
+        return
+
+    status_msg = await update.message.reply_text("☕ Telveler analiz ediliyor, sakın ayrılma...")
+    try:
+        photo_file = await photo_obj.get_file()
+        f = io.BytesIO()
+        await photo_file.download_to_memory(f)
+        f.seek(0)
+        
+        prompt = "Sen dobra, detaycı eski bir Türk falcı teyzesisin. Görseldeki fincan lekelerini analiz et, 'kuş var', 'yolun kapalı' gibi spesifik ol. Maks 150 kelime."
+        
+        def call_fal():
+            return client.models.generate_content(model=MODEL_NAME, contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
+        
+        res = await asyncio.to_thread(call_fal)
+        await status_msg.edit_text(f"☕ Falcı Teyze diyor ki:\n\n{res.text}")
+    except: 
+        await status_msg.edit_text("⚠️ Fincanı okuyamadım, enerjin çok ağır.")
+
+# --- EKLENEN GÜNCEL VERİ DESTEKLİ BURÇ MOTORU ---
+def get_daily_horoscope_data(burc):
+    try:
+        url = f"https://burc-api.vercel.app/api/{burc}"
+        response = requests.get(url, timeout=5)
+        return response.json().get("yorum", "") if response.status_code == 200 else ""
+    except: return ""
+
+async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    metin = update.message.text.lower()
+    temiz_args = re.sub(r'^/burcyorumla(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip().split()
+    
+    if not temiz_args:
+        await update.message.reply_text("❗ Örnek: /burcyorumla akrep")
+        return
+    
+    burc_input = temiz_args[0]
+    mapping = {"koc": "koc", "boga": "boga", "yengec": "yengec", "basak": "basak", "oglak": "oglak", "balik": "balik"}
+    api_burc = mapping.get(burc_input, burc_input)
+    
+    status_msg = await update.message.reply_text(f"🛰️ {api_burc.capitalize()} için yıldız haritası çekiliyor...")
+
+    try:
+        raw_data = await asyncio.to_thread(get_daily_horoscope_data, api_burc)
+        tz = pytz.timezone("Europe/Istanbul")
+        date_str = datetime.datetime.now(tz).strftime("%d-%m-%Y")
+        prompt = (f"Tarih: {date_str}. Kaynak veri: '{raw_data}'. {api_burc} burcunu bu veriye dayanarak "
+                  "kendi tarzınla, derin ve güncel şekilde yeniden yorumla. Maks 100 kelime.")
+        
+        def call_burc():
+            return client.models.generate_content(model=MODEL_NAME, contents=prompt)
+            
+        res = await asyncio.to_thread(call_burc)
+        await status_msg.edit_text(f"✨ {api_burc.upper()} YORUMU ({date_str}):\n\n{res.text}")
+    except: 
+        await status_msg.edit_text("❌ Veriye ulaşılamadı.")
+
+
+# --- ADMİN KOMUTLARI ---
 
 async def getir_command(update, context):
     if update.effective_chat.type == 'private' and update.effective_user.id == ADMIN_ID:
@@ -302,7 +370,6 @@ async def kendin_yanitla_command(update, context):
         pending_replies[update.effective_user.id] = int(context.args[0].split('/')[-1])
         await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
 
-# --- EKLENEN ADMİN KOMUTLARI BURADA BİTİYOR ---
 
 async def main():
     keep_alive()
@@ -311,7 +378,6 @@ async def main():
     scheduler = AsyncIOScheduler(timezone=pytz.timezone("Europe/Istanbul"))
     scheduler.start()
 
-    # Filtreler Güncellendi: Artık SPECIAL_USER_ID de özel mesajda engellenmiyor.
     application.add_handler(CommandHandler("start", reject_private, filters=filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS))))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS)), reject_private))
     
@@ -322,8 +388,9 @@ async def main():
     application.add_handler(CommandHandler("tarotbak", tarot_command))
     application.add_handler(CommandHandler("quote", quote_command))
     application.add_handler(CommandHandler("kombinle", kombinle_command))
+    application.add_handler(CommandHandler("falbak", falbak_command))
+    application.add_handler(CommandHandler("burcyorumla", burcyorumla_command))
     
-    # EKLENEN KOMUTLARIN TETİKLEYİCİLERİ
     application.add_handler(CommandHandler("getir", getir_command))
     application.add_handler(CommandHandler("yanitla", admin_text_reply))
     application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
