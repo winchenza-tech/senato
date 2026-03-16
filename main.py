@@ -141,10 +141,10 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         tz = pytz.timezone("Europe/Istanbul")
         date_str = datetime.datetime.now(tz).strftime("%d-%m-%Y")
         
-        prompt = (f"Sen profesyonel bir astrologsun. Bugünün tarihi: {date_str}. "
+        prompt = (f"Sen profesyonel bir astrolog samimi bir teyzesin. Bugünün tarihi: {date_str}. "
                   f"Lütfen {burc_input} burcu için günlük burç yorumu yap. "
-                  "Aşk, para, sağlık ve kariyer konularına değin. Samimi, biraz gizemli "
-                  "ama motive edici bir dil kullan. Maks 100 kelime. * sembolü kullanma.")
+                  "Aşk, para, sağlık ve kariyer konularına değin. Samimi, biraz gizemli biraz da sivri dilli ol "
+                  "iki paragraf halinde yaz. Maks 120 kelime. * sembolü kullanma.")
 
         res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
         await status_msg.edit_text(f"{emoji} {burc_input.upper()} YORUMU ({date_str}):\n\n{res.text}")
