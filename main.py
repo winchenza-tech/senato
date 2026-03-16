@@ -38,21 +38,10 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 AUTHORIZED_GROUP_ID = -1001506019626
-BOT_NAME = "Zenithar"
-
 ADMIN_ID = 7094870780
-SPECIAL_USER_ID = 8161908351
-ALLOWED_USERS = [ADMIN_ID, SPECIAL_USER_ID]
-
-UNAUTHORIZED_IMAGE_URL = "https://i.ibb.co/bgq1t0kp/MG-8928.jpg"
+ALLOWED_USERS = [ADMIN_ID, 8161908351]
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
-
-group_history = deque(maxlen=250)
-message_id_cache = {}
-last_usage = {}
-COOLDOWN_MINUTES = 10
-pending_replies = {}
 
 ZODIAC_EMOJIS = {
     "koç": "♈", "boğa": "♉", "ikizler": "♊", "yengeç": "♋", "aslan": "♌", 
@@ -60,29 +49,16 @@ ZODIAC_EMOJIS = {
     "kova": "♒", "balık": "♓"
 }
 
-# --- 3. BOT FONKSİYONLARI ---
-
-async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if update.effective_chat.type == 'private' and user_id == ADMIN_ID:
-        if user_id in pending_replies:
-            target_id = pending_replies.pop(user_id)
-            if update.message.text: await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=update.message.text, reply_to_message_id=target_id)
-            return
-    if update.effective_chat.id == AUTHORIZED_GROUP_ID and update.message and update.message.text:
-        u_name = update.effective_user.first_name
-        group_history.append(f"{u_name}: {update.message.text}")
-        message_id_cache[update.message.message_id] = {"name": u_name, "text": update.message.text}
-
-# --- GÜNCEL BURÇ MOTORU (GÜVENLİ VE PM DESTEKLİ) ---
+# --- 3. BURÇ YORUMLAMA MOTORU ---
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Yetki Kontrolü: Doğru grup VEYA Admin Özel Mesajı
-    is_admin_pm = update.effective_chat.type == 'private' and update.effective_user.id == ADMIN_ID
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID and not is_admin_pm:
+    # Yetki: Grup VEYA Admin PM
+    is_pm = update.effective_chat.type == 'private' and update.effective_user.id == ADMIN_ID
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID and not is_pm:
         return
 
     metin = update.message.text.lower()
     temiz_args = re.sub(r'^/burcyorumla(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip().split()
+    
     if not temiz_args:
         await update.message.reply_text("❗ Örnek: /burcyorumla akrep")
         return
@@ -90,17 +66,21 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     burc_input = temiz_args[0]
     emoji = ZODIAC_EMOJIS.get(burc_input, "✨")
     
-    status_msg = await update.message.reply_text(f"🛰️ {burc_input.capitalize()} için yıldız haritası oluşturuluyor...")
+    status_msg = await update.message.reply_text(f"🛰️ {burc_input.capitalize()} için kozmik bağlantı kuruluyor...")
     
+    # Tarih bilgisi
     tz = pytz.timezone("Europe/Istanbul")
     date_str = datetime.datetime.now(tz).strftime("%d %B %Y")
 
-    prompt = (f"Bugünün tarihi: {date_str}. Sen usta bir astrologsun. {burc_input} burcu için "
-              "günlük yorum yap. Karakterin: Dobra, zeki, iğneleyici ve gerçekçi. "
-              "Zenithar dünyasına uygun derinlikte ve iğneleyici konuş. Maks 100 kelime. Yıldız (*) kullanma.")
+    # PROMPT: Güvenlik filtrelerine takılmayacak ama karakteri koruyacak şekilde optimize edildi
+    prompt = (f"Bugünün tarihi: {date_str}. Sen usta ve biraz da gizemli bir astrologsun. "
+              f"{burc_input} burcu için bugüne özel derin bir günlük yorum yaz. "
+              "Üslubun: Karakteristik, gerçekçi, lafını sakınmayan ve hafif iğneleyici olsun. "
+              "Klişe pembe tablolardan kaçın, insanın yüzüne gerçekleri çarpan bir tarz kullan. "
+              "Maksimum 90 kelime. Asla yıldız (*) işareti kullanma.")
 
     try:
-        # Sansürleri Kaldıran Güvenlik Ayarları
+        # GÜVENLİK AYARLARI: Tüm bariyerleri kaldırıyoruz
         safety_settings = [
             types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
             types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
@@ -108,36 +88,40 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
         ]
 
-        def call_gemini():
+        def generate():
             return client.models.generate_content(
-                model='gemini-2.0-flash', 
+                model='gemini-2.0-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(safety_settings=safety_settings)
             )
 
-        res = await asyncio.to_thread(call_gemini)
+        res = await asyncio.to_thread(generate)
         
-        if not res.text:
-            raise Exception("Boş yanıt alındı.")
+        if res.text:
+            await status_msg.edit_text(f"{emoji} {burc_input.upper()} ({date_str}):\n\n{res.text}")
+        else:
+            await status_msg.edit_text("❌ Yıldızlar şu an konuşmak istemiyor, birazdan tekrar dene.")
 
-        await status_msg.edit_text(f"{emoji} {burc_input.upper()} YORUMU ({date_str}):\n\n{res.text}")
     except Exception as e:
-        print(f"Hata detayı: {e}")
-        await status_msg.edit_text("❌ Yıldızlar şu an çok yoğun, frekans ayarlanamadı. Tekrar dene!")
+        print(f"Hata: {e}")
+        await status_msg.edit_text("⚠️ Kozmik bir fırtına çıktı, bağlantı koptu. Tekrar dener misin?")
 
-# Diğer komutları (tarot, özet, fal) buraya aynı mantıkla ekleyebilirsin.
-
+# --- 4. ANA ÇALIŞTIRICI ---
 async def main():
     keep_alive()
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
     application.add_handler(CommandHandler("burcyorumla", burcyorumla_command))
-    application.add_handler(MessageHandler((filters.TEXT) & (~filters.COMMAND), record_message))
+    
+    # Diğer mesajları kaydetmek için (opsiyonel)
+    async def log_msg(u, c): pass
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), log_msg))
 
+    print("Zenithar Burç Motoru Yayında!")
     await application.initialize(); await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     try: asyncio.run(main())
-    except Exception as e: print(f"Hata: {e}")
+    except: pass
