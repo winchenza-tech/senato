@@ -47,6 +47,16 @@ UNAUTHORIZED_IMAGE_URL = "https://i.ibb.co/bgq1t0kp/MG-8928.jpg"
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
+# Gemini Güvenlik Filtrelerini Kapatma Ayarı (Aşağılama/Dalga Geçme komutları için şart)
+SAFETY_CONFIG = types.GenerateContentConfig(
+    safety_settings=[
+        types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+        types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+        types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+        types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+    ]
+)
+
 group_history = deque(maxlen=250)
 message_id_cache = {}
 last_usage = {}
@@ -116,7 +126,7 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 4. ANA KOMUTLAR ---
 
-# ✨ BURÇ MOTORU (Hata Mesajı ve Gemini Kontrolü)
+# ✨ BURÇ MOTORU
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -143,12 +153,13 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                   "samimi, biraz gizemli, yer yer sivri bir dil kullan. "
                   "Maksimum 100 kelime olsun. * sembolü kullanma.")
 
-        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
+        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt, config=SAFETY_CONFIG)
         await status_msg.edit_text(f"{emoji} {burc_input.upper()} YORUMU ({date_str}):\n\n{res.text}")
-    except:
+    except Exception as e:
+        print(f"Burç Hatası: {e}")
         await status_msg.edit_text("❌ Yıldızlarla bağlantı kurulamadı.")
 
-# 🃏 TAROT (ORİJİNAL PROMPT)
+# 🃏 TAROT
 async def tarot_command(update, context):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
     secilenler = random.sample(TAROT_CARDS, 3)
@@ -157,11 +168,13 @@ async def tarot_command(update, context):
     prompt = f"Tarot: {', '.join(secilenler)} mistik biraz da samimi bir dille yorumla. Maks 100 kelime kullan. * sembolü kullanma. yorumda kartlardan bahsederken 'asılan adam' gibi değil asılan adam kartı gibi bahset yani tarot bilmeyen biri dahi anlayabilsin. geçmiş şimdi ve gelecek kartlarını 3 ayrı paragrafa böl."
     
     try:
-        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
+        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt, config=SAFETY_CONFIG)
         await status.edit_text(f"🔮 TAROT FALI:\n\n🃏 Kartlar: {', '.join(secilenler)}\n\n📜 Yorum:\n{res.text}")
-    except: await status.edit_text("Ruhlar alemine ulaşılamadı.")
+    except Exception as e: 
+        print(f"Tarot Hatası: {e}")
+        await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
-# 📝 ÖZETLEME (ORİJİNAL PROMPT)
+# 📝 ÖZETLEME
 async def summarize_command(update, context):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
     chat_id = update.effective_chat.id
@@ -192,12 +205,15 @@ async def summarize_command(update, context):
     {full_text}"""
     
     try:
-        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
-        await status_msg.delete(); await update.message.reply_text(f"📝 CHAT ÖZETİ:\n{res.text}")
+        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt, config=SAFETY_CONFIG)
+        await status_msg.delete()
+        await update.message.reply_text(f"📝 CHAT ÖZETİ:\n{res.text}")
         last_usage[chat_id] = now
-    except: pass
+    except Exception as e: 
+        print(f"Özetleme Hatası: {e}")
+        await status_msg.edit_text("❌ Özet çıkartılamadı.")
 
-# 💀 ROAST (ORİJİNAL PROMPT)
+# 💀 ROAST
 async def comment_command(update, context):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
     target = update.message.reply_to_message
@@ -215,13 +231,14 @@ async def comment_command(update, context):
             photo_file = await target.photo[-1].get_file()
             f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
             image_bytes = f.read()
-            res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=[types.Content(parts=[types.Part.from_text(text=vision_prompt), types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")])], config=types.GenerateContentConfig(safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')]))
+            res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=[types.Content(parts=[types.Part.from_text(text=vision_prompt), types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")])], config=SAFETY_CONFIG)
         else:
-            res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=roast_prompt)
+            res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=roast_prompt, config=SAFETY_CONFIG)
         await target.reply_text(f"💀 {res.text}")
-    except: pass
+    except Exception as e: 
+        print(f"Yorumla (Roast) Hatası: {e}")
 
-# 👔 KOMBİNLE (ORİJİNAL PROMPT)
+# 👔 KOMBİNLE
 async def kombinle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS: return
@@ -237,8 +254,10 @@ async def kombinle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompt = "Sen bir moda ikonusun. Bu görseldeki kıyafeti analiz et ve buna uygun (ayakkabı, pantolon, aksesuar vb.) harika bir kombin önerisi yap. Kısa, öz ve etkileyici olsun."
         res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=[types.Content(parts=[types.Part.from_text(text=prompt), types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")])])
         fashion_sessions[user_id] = {"count": 1}
-        await status.edit_text(f"✨ EZDERYA STYLE:\n\n{res.text}\n\n*(Bu kombin hakkında 2 soru daha sorabilirsin)")
-    except: await status.edit_text("❌ Analiz başarısız.")
+        await status.edit_text(f"✨ EZDERYA STYLE:\n\n{res.text}\n\n*(Bu kombin hakkında 2 soru daha sorabilirsin)*")
+    except Exception as e: 
+        print(f"Kombinle Hatası: {e}")
+        await status.edit_text("❌ Analiz başarısız.")
 
 async def handle_fashion_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -252,7 +271,8 @@ async def handle_fashion_chat(update: Update, context: ContextTypes.DEFAULT_TYPE
             suffix = f"\n\n*(Kalan soru hakkın: {remaining})*" if remaining > 0 else "\n\n*(Soru hakkın doldu)*"
             await update.message.reply_text(f"👔 {res.text}{suffix}")
             if remaining == 0: del fashion_sessions[user_id]
-        except: pass
+        except Exception as e: 
+            print(f"Kombin Chat Hatası: {e}")
     else: del fashion_sessions[user_id]
 
 # --- 5. ADMİN VE DİĞER KOMUTLAR ---
@@ -269,9 +289,10 @@ async def admin_text_reply(update, context):
         msg_id = int(context.args[0].split('/')[-1])
         t_name = message_id_cache[msg_id]["name"] if msg_id in message_id_cache else "Biri"
         prompt = f"HEDEF: {t_name} GÖREV: Yerin dibine sok, ağır konuş, maks 15 kelime."
-        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
+        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt, config=SAFETY_CONFIG)
         await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"💀 {res.text}", reply_to_message_id=msg_id)
-    except: pass
+    except Exception as e: 
+        print(f"Admin Text Reply Hatası: {e}")
 
 async def kendin_yanitla_command(update, context):
     if update.effective_chat.type == 'private' and update.effective_user.id == ADMIN_ID and context.args:
@@ -285,7 +306,8 @@ async def quote_command(update, context):
     try:
         res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
         await update.message.reply_text(f"🖋 {res.text}")
-    except: pass
+    except Exception as e: 
+        print(f"Quote Hatası: {e}")
 
 async def main():
     keep_alive()
@@ -313,7 +335,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/son(100|200)'), summarize_command))
     application.add_handler(MessageHandler((filters.TEXT | filters.VOICE | filters.PHOTO) & (~filters.COMMAND), record_message))
 
-    print("Zenithar Services Orijinal Promptlarla Aktif...")
+    print("Zenithar Services Orijinal Promptlarla ve Stabil Haliyle Aktif...")
     await application.initialize(); await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     while True: await asyncio.sleep(3600)
