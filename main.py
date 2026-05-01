@@ -4,6 +4,7 @@ import datetime
 import os
 import random
 import io
+import time  # Çakışma önleyici için eklendi
 from collections import deque
 from flask import Flask
 from threading import Thread
@@ -186,7 +187,7 @@ async def summarize_command(update, context):
     except: pass
 
 async def tarot_command(update, context):
-    # Admin DM yetkisi
+    # Admin DM yetkisi eklendi
     if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id != ADMIN_ID: return
     
     secilenler = random.sample(TAROT_CARDS, 3)
@@ -258,6 +259,8 @@ async def main():
 
 if __name__ == "__main__":
     try:
+        print("Eski bot örneğinin (instance) kapanması bekleniyor...")
+        time.sleep(10)  # Çakışma önleyici bekleme süresi
         asyncio.run(main())
     except Exception as e:
         print(f"Kritik Hata: {e}")
