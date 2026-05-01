@@ -280,7 +280,7 @@ async def main():
     scheduler = AsyncIOScheduler(timezone=pytz.timezone("Europe/Istanbul"))
     
     # Her saatin 50. dakikasında (10:50, 11:50 vb.) otomatik laf sokma fonksiyonunu çalıştırır
-    scheduler.add_job(hourly_roast, 'cron', minute=50, args=[application.bot])
+    scheduler.add_job(hourly_roast, 'cron', minute=15, args=[application.bot])
     
     scheduler.start()
 
