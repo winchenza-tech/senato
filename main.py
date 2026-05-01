@@ -52,9 +52,6 @@ last_usage = {}
 COOLDOWN_MINUTES = 10
 pending_replies = {}
 
-# Moda sohbet hafızası
-fashion_sessions = {} 
-
 # --- TAROT KARTLARI ---
 TAROT_CARDS = [
     "Deli", "Büyücü", "Azize", "İmparatoriçe", "İmparator", "Aziz",
@@ -90,12 +87,6 @@ async def reject_unauthorized_group(update: Update, context: ContextTypes.DEFAUL
 async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
-    # Moda sohbeti takibi (Özel mesajda)
-    if update.effective_chat.type == 'private' and user_id in fashion_sessions:
-        if update.message.text and not update.message.text.startswith('/'):
-            await handle_fashion_chat(update, context)
-            return
-
     # Admin'in grup mesajlarına yanıt verme mantığı
     if update.effective_chat.type == 'private' and user_id == ADMIN_ID:
         if user_id in pending_replies:
@@ -118,68 +109,6 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del message_id_cache[next(iter(message_id_cache))]
 
 # --- KOMUTLAR ---
-
-async def kombinle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ALLOWED_USERS: return
-
-    target = update.message.reply_to_message
-    if not target or not target.photo:
-        await update.message.reply_text("📸 Lütfen kombin tavsiyesi almak istediğin bir kıyafet fotoğrafını yanıtla!")
-        return
-
-    status = await update.message.reply_text("🧐 Ivanarya stili inceliyor, bekleyin...")
-    
-    try:
-        photo_file = await target.photo[-1].get_file()
-        f = io.BytesIO()
-        await photo_file.download_to_memory(f)
-        f.seek(0)
-        image_bytes = f.read()
-
-        prompt = "Sen bir moda ikonusun. Bu görseldeki kıyafeti analiz et ve buna uygun (ayakkabı, pantolon, aksesuar vb.) harika bir kombin önerisi yap. Kısa, öz ve etkileyici olsun."
-
-        def call_fashion_ai():
-            return client.models.generate_content(
-                model='gemini-2.0-flash',
-                contents=[
-                    types.Content(parts=[
-                        types.Part.from_text(text=prompt),
-                        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
-                    ])
-                ]
-            )
-        
-        res = await asyncio.to_thread(call_fashion_ai)
-        
-        fashion_sessions[user_id] = {"count": 1}
-        
-        await status.edit_text(f"✨ EZDERYA STYLE:\n\n{res.text}\n\n*(Bu kombin hakkında 2 soru daha sorabilirsin)")
-    except Exception as e:
-        print(f"Moda hatası: {e}")
-        await status.edit_text("❌ Analiz başarısız oldu.")
-
-async def handle_fashion_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    count = fashion_sessions[user_id]["count"]
-    
-    if count < 3:
-        fashion_sessions[user_id]["count"] += 1
-        remaining = 3 - fashion_sessions[user_id]["count"]
-        
-        prompt = f"Kullanıcı önerdiğin kombin hakkında şunu sordu: '{update.message.text}'. Nazik, şık ve uzman bir dille cevapla. Maks 40 kelime."
-        
-        try:
-            res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
-            suffix = f"\n\n*(Kalan soru hakkın: {remaining})*" if remaining > 0 else "\n\n*(Soru hakkın doldu, yeni kombin için görseli yanıtla!)*"
-            await update.message.reply_text(f"👔 {res.text}{suffix}")
-            
-            if remaining == 0:
-                del fashion_sessions[user_id]
-        except:
-            await update.message.reply_text("Zihnim şu an biraz karışık.")
-    else:
-        del fashion_sessions[user_id]
 
 async def announce_command(update, context):
     if update.effective_user.id == ADMIN_ID and context.args:
@@ -257,7 +186,9 @@ async def summarize_command(update, context):
     except: pass
 
 async def tarot_command(update, context):
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
+    # Admin DM yetkisi
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id != ADMIN_ID: return
+    
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text(f"🃏Kartlar karıştırılıyor...\n1. {secilenler[0]}\n2. {secilenler[1]}\n3. {secilenler[2]}")
     await asyncio.sleep(2)
@@ -269,15 +200,6 @@ async def tarot_command(update, context):
         res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
         await status.edit_text(f"🔮TAROT FALI:\n\n🃏 Kartlar: {', '.join(secilenler)}\n\n📜 Yorum:\n{res.text}")
     except: await status.edit_text("Ruhlar alemine ulaşılamadı.")
-
-async def quote_command(update, context):
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID or not context.args: return
-    keyword = " ".join(context.args)
-    prompt = f"'{keyword}' ile ilgili filozof sözü getir. Sadece söz ve kişi."
-    try:
-        res = await asyncio.to_thread(client.models.generate_content, model='gemini-2.0-flash', contents=prompt)
-        await update.message.reply_text(f"🖋 {res.text}")
-    except: pass
 
 # --- EKLENEN ADMİN KOMUTLARI BURADAN BAŞLIYOR ---
 
@@ -311,7 +233,6 @@ async def main():
     scheduler = AsyncIOScheduler(timezone=pytz.timezone("Europe/Istanbul"))
     scheduler.start()
 
-    # Filtreler Güncellendi: Artık SPECIAL_USER_ID de özel mesajda engellenmiyor.
     application.add_handler(CommandHandler("start", reject_private, filters=filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS))))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS)), reject_private))
     
@@ -320,8 +241,6 @@ async def main():
     application.add_handler(CommandHandler("duyuru", announce_command))
     application.add_handler(CommandHandler("yorumla", comment_command))
     application.add_handler(CommandHandler("tarotbak", tarot_command))
-    application.add_handler(CommandHandler("quote", quote_command))
-    application.add_handler(CommandHandler("kombinle", kombinle_command))
     
     # EKLENEN KOMUTLARIN TETİKLEYİCİLERİ
     application.add_handler(CommandHandler("getir", getir_command))
