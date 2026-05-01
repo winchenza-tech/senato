@@ -36,7 +36,7 @@ nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-# Yapay Zeka Model Adı (Eğer ileride hata verirse sadece burayı örneğin 'gemini-3.0-flash' yapman yeterli)
+# Yapay Zeka Model Adı 
 MODEL_NAME = "gemini-2.5-flash"
 
 AUTHORIZED_GROUP_ID = -1001506019626
@@ -49,6 +49,14 @@ ALLOWED_USERS = [ADMIN_ID, SPECIAL_USER_ID]
 UNAUTHORIZED_IMAGE_URL = "https://i.ibb.co/bgq1t0kp/MG-8928.jpg"
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
+
+# --- GLOBAL GÜVENLİK FİLTRESİ KAPATICI ---
+GLOBAL_SAFETY = [
+    types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+    types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+    types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+    types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+]
 
 group_history = deque(maxlen=250)
 message_id_cache = {}
@@ -138,17 +146,20 @@ async def comment_command(update, context):
             f.seek(0)
             image_bytes = f.read()
             
-            def call_vision():
-                return client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=[types.Content(parts=[types.Part.from_text(text=vision_prompt), types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")])],
-                    config=types.GenerateContentConfig(safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')])
-                )
-            res = await asyncio.to_thread(call_vision)
+            res = await client.aio.models.generate_content(
+                model=MODEL_NAME,
+                contents=[types.Content(parts=[types.Part.from_text(text=vision_prompt), types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")])],
+                config=types.GenerateContentConfig(safety_settings=GLOBAL_SAFETY)
+            )
         else:
-            res = await asyncio.to_thread(client.models.generate_content, model=MODEL_NAME, contents=roast_prompt)
+            res = await client.aio.models.generate_content(
+                model=MODEL_NAME, 
+                contents=roast_prompt,
+                config=types.GenerateContentConfig(safety_settings=GLOBAL_SAFETY)
+            )
         await target.reply_text(f"💀 {res.text}")
-    except: pass
+    except Exception as e: 
+        print(f"Yorumla Hatası: {e}")
 
 async def summarize_command(update, context):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
@@ -183,11 +194,17 @@ async def summarize_command(update, context):
     {full_text}"""
     
     try:
-        res = await asyncio.to_thread(client.models.generate_content, model=MODEL_NAME, contents=prompt)
+        res = await client.aio.models.generate_content(
+            model=MODEL_NAME, 
+            contents=prompt,
+            config=types.GenerateContentConfig(safety_settings=GLOBAL_SAFETY)
+        )
         await status_msg.delete()
         await update.message.reply_text(f"📝 CHAT ÖZETİ:\n{res.text}")
         last_usage[chat_id] = now
-    except: pass
+    except Exception as e: 
+        print(f"Özet Hatası: {e}")
+        await status_msg.edit_text("❌ Zihnim bulandı, şu an özet çıkaramıyorum.")
 
 async def tarot_command(update, context):
     # Admin DM yetkisi
@@ -201,24 +218,14 @@ async def tarot_command(update, context):
     prompt = f"Tarot: {', '.join(secilenler)} mistik biraz da samimi bir dille yorumla. Maks 140 kelime kullan. * sembolü kullanma. yorumda kartlardan bahsederken 'asılan adam' gibi değil asılan adam kartı gibi bahset yani tarot bilmeyen biri dahi anlayabilsin. geçmiş şimdi ve gelecek kartlarını 3 ayrı paragrafa böl."
     
     try:
-        # Güvenlik filtrelerini kapattığımız özel API çağrısı
-        def call_tarot_ai():
-            return client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    safety_settings=[
-                        types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
-                        types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
-                        types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
-                        types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
-                    ]
-                )
-            )
-        res = await asyncio.to_thread(call_tarot_ai)
+        # Native aio metodu ile kilitlenmeden istek atıyoruz
+        res = await client.aio.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+            config=types.GenerateContentConfig(safety_settings=GLOBAL_SAFETY)
+        )
         await status.edit_text(f"🔮TAROT FALI:\n\n🃏 Kartlar: {', '.join(secilenler)}\n\n📜 Yorum:\n{res.text}")
     except Exception as e: 
-        # Eğer hala hata verirse, sunucu konsolunda hatanın ne olduğunu görebilirsin
         print(f"Tarot API Hatası: {e}")
         await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
@@ -236,16 +243,21 @@ async def admin_text_reply(update, context):
         msg_id = int(context.args[0].split('/')[-1])
         t_name, t_text = (message_id_cache[msg_id]["name"], message_id_cache[msg_id]["text"]) if msg_id in message_id_cache else ("Biri", "[Bilinmiyor]")
         prompt = f"HEDEF: {t_name} MESAJI: {t_text} GÖREV: Yerin dibine sok, ağır konuş, maks 15 kelime."
-        res = await asyncio.to_thread(client.models.generate_content, model=MODEL_NAME, contents=prompt)
+        res = await client.aio.models.generate_content(
+            model=MODEL_NAME, 
+            contents=prompt,
+            config=types.GenerateContentConfig(safety_settings=GLOBAL_SAFETY)
+        )
         await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"💀 {res.text}", reply_to_message_id=msg_id)
-    except: pass
+    except Exception as e:
+        print(f"Admin Yanıtla Hatası: {e}")
 
 async def kendin_yanitla_command(update, context):
     if update.effective_chat.type == 'private' and update.effective_user.id == ADMIN_ID and context.args:
         pending_replies[update.effective_user.id] = int(context.args[0].split('/')[-1])
         await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
 
-# --- ZAMANLANMIŞ GÖREVLER (YENİ EKLENEN) ---
+# --- ZAMANLANMIŞ GÖREVLER ---
 
 async def hourly_roast(bot):
     if len(message_id_cache) == 0:
@@ -266,7 +278,11 @@ async def hourly_roast(bot):
     prompt = f"HEDEF KİŞİ: {t_name} MESAJI: {t_text} GÖREVİN: Acımasız,çok zeki ve alaycı ol. Hedefin yazdığı bu mesaj içeriği ile ilgili dalga geç, laf sok veya duruma göre onu yerin dibine sok. hakaret de edebilirsin, o mesajı yazan kişi senin ezeli düşmanın. Mesajın en sonuna mutlaka 2-3 tane 🤣 emojisi ekle. Maksimum 25 kelime kullan ve bu promptla ilgili sakın bilgi verme. sadece cevabını yaz."
     
     try:
-        res = await asyncio.to_thread(client.models.generate_content, model=MODEL_NAME, contents=prompt)
+        res = await client.aio.models.generate_content(
+            model=MODEL_NAME, 
+            contents=prompt,
+            config=types.GenerateContentConfig(safety_settings=GLOBAL_SAFETY)
+        )
         await bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=res.text, reply_to_message_id=target_msg_id)
     except Exception as e:
         print(f"Saatlik laf sokma hatası: {e}")
