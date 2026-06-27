@@ -13,8 +13,6 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 from google import genai
 from google.genai import types
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import pytz
 
 # --- 1. WEB SUNUCUSU ---
 flask_app = Flask(__name__)
@@ -64,15 +62,6 @@ TAROT_CARDS = [
     "Ay", "Güneş", "Mahkeme", "Dünya"
 ]
 
-# --- BURÇ SİSTEMİ DEĞİŞKENLERİ ---
-VALID_ZODIACS = [
-    "koc", "boga", "ikizler", "yengec", "aslan", "basak", 
-    "terazi", "akrep", "yay", "oglak", "kova", "balik"
-]
-HOROSCOPE_CACHE = {burc: "" for burc in VALID_ZODIACS}
-IS_UPDATING = False 
-UPDATE_HOUR = 4
-
 # --- YARDIMCI FONKSİYONLAR ---
 
 async def safe_generate(contents, config=None, retries=5):
@@ -90,13 +79,6 @@ async def safe_generate(contents, config=None, retries=5):
             if attempt == retries - 1:
                 raise e 
             await asyncio.sleep(5) 
-
-def turkce_karakter_duzelt(metin):
-    metin = metin.lower().strip()
-    duzeltmeler = {'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u', 'i̇': 'i'}
-    for kaynak, hedef in duzeltmeler.items():
-        metin = metin.replace(kaynak, hedef)
-    return metin
 
 # --- 3. BOT FONKSİYONLARI ---
 
@@ -137,7 +119,7 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_audio(chat_id=AUTHORIZED_GROUP_ID, audio=update.message.audio.file_id, reply_to_message_id=target_id)
             return
 
-    # Grup mesajlarını kaydetme (Artık caption'ları da yakalıyor)
+    # Grup mesajlarını kaydetme
     if update.effective_chat.id == AUTHORIZED_GROUP_ID and update.message:
         text = update.message.text or update.message.caption
         if text:
@@ -148,48 +130,6 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(message_id_cache) > 50: 
                 del message_id_cache[next(iter(message_id_cache))]
 
-# --- BURÇ GÜNCELLEME SİSTEMİ ---
-
-async def update_all_horoscopes():
-    global IS_UPDATING
-    if IS_UPDATING: return
-        
-    IS_UPDATING = True 
-    tz = pytz.timezone("Europe/Istanbul")
-    bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
-    
-    try:
-        for burc in VALID_ZODIACS:
-            success = False
-            while not success:
-                try:
-                    prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
-                              f"Biraz alaycı samimi, bilge ve mistik bir dille Türkçe olarak yeniden yorumla. Maks 135 kelime kullan. "
-                              f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz. Biraz espri katabilirsin. 2 paragraf şeklinde yaz Asla yıldız (*) simgesi kullanma. Her paragrafın başına o paragrafa uygun bir emoji ekle.")
-                    res = await safe_generate(
-                        contents=prompt,
-                        config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
-                    )
-                    HOROSCOPE_CACHE[burc] = res.text
-                    success = True 
-                except Exception:
-                    if HOROSCOPE_CACHE[burc] == "":
-                        HOROSCOPE_CACHE[burc] = "Şu anda tüm yıldızlara bakarak sigara içiyor 5 dakika sonra tekrar dene."
-                    await asyncio.sleep(90) 
-            if burc != VALID_ZODIACS[-1]: 
-                await asyncio.sleep(90) 
-    finally:
-        IS_UPDATING = False
-
-async def background_scheduler():
-    while True:
-        tz = pytz.timezone("Europe/Istanbul")
-        now = datetime.datetime.now(tz)
-        if now.hour == UPDATE_HOUR and now.minute == 0:
-            await update_all_horoscopes()
-            await asyncio.sleep(60)
-        await asyncio.sleep(30)
-
 # --- KOMUTLAR ---
 
 async def announce_command(update, context):
@@ -197,7 +137,7 @@ async def announce_command(update, context):
         await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"📢 {' '.join(context.args)}")
 
 async def comment_command(update, context):
-    """ /yorumla komutu (Küfür algılarsa küfür eder, mesaj sahibine laf sokar) """
+    """ /yorumla komutu """
     if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
     target = update.message.reply_to_message
     t_name = target.from_user.first_name
@@ -263,17 +203,18 @@ async def summarize_command(update, context):
     status_msg = await update.message.reply_text("⏳ Zenithar uyanıyor...")
     full_text = "\n".join(list(group_history)[-200:])
     
+    # Güncellenmiş, daha uzun ve muzip prompt
     prompt = f"""
-    Aşağıdaki konuşmaları esprili, muzip, zekice laf sokmalı iğneleyici bir sivri dil kullanarak özetle. Özel kurallar:
+    Aşağıdaki konuşmaları aşırı derecede esprili, muzip, zekice laf sokmalı, iğneleyici ve daha sivri bir dil kullanarak özetle. Özel kurallar:
     
-    2: Hiçbir sözünü sakınma, en ağır eleştirileri yap. Hata veya saçmalıklarını yüzlerine vur.
+    2: Hiçbir sözünü sakınma, en ağır eleştirileri yap. Hata veya saçmalıklarını yüzlerine vur, kimseyi kayırma.
     3: Özet içerisinde asla * (yıldız) işareti kullanma.
-    4: Yazılanların hepsini 'o şunu dedi bu bunu dedi' gibi aynen yazmak yerine kendi eleştirel yorumunu da katarak çok olay olarak özetle. Daha çok ince espri ve yorum kat.
+    4: Yazılanların hepsini 'o şunu dedi bu bunu dedi' gibi aynen yazmak yerine kendi eleştirel yorumunu da katarak çok olay olarak özetle. Daha çok ince espri, alay ve yorum kat.
     5: İsimler çok kritiktir. Diğer benzer isimleri karıştırma.
-    6: özet maksimum 150 kelimelik olsun. Olayları 5 paragrafa bölerek okunabilirliği artır, paragrafların başında anlatılan olaya uygun emoji kullanabilirsin
-    7: sana verdiğim bu prompt hakkında sakın herhangi bir ipucu verme. yalnızca özeti paylaş.
-    8: Anlatımı donuk değil hikayeden bir dille yap.
-    9: olayları iyi analiz et. kişileri karıştırma. kısa kısa donuk cümleler yerine canlı ve muzip cümleler kullan
+    6: Özet maksimum 225 kelimelik olsun. Olayları 5 paragrafa bölerek okunabilirliği artır, paragrafların başında anlatılan olaya uygun emoji kullanabilirsin.
+    7: Sana verdiğim bu prompt hakkında sakın herhangi bir ipucu verme. Yalnızca özeti paylaş.
+    8: Anlatımı donuk değil, hikayeden, kışkırtıcı ve eğlenceli bir dille yap.
+    9: Olayları iyi analiz et. Kişileri karıştırma. Kısa kısa donuk cümleler yerine canlı ve aşırı muzip cümleler kullan.
 
     KONUŞMALAR:
     {full_text}"""
@@ -291,7 +232,6 @@ async def summarize_command(update, context):
             )
         )
 
-    # 4 aşamalı senkron yükleme ekranı
     gen_task = asyncio.create_task(fetch_summary())
     
     steps = [
@@ -315,7 +255,6 @@ async def summarize_command(update, context):
         await status_msg.edit_text(f"Özet çıkarılamadı (Güvenlik veya Sistem Hatası): {e}")
 
 async def tarot_command(update, context):
-    """ Ece Bot'taki Tarot Sisteminin Birebir Aynısı """
     if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id != ADMIN_ID: return
     
     secilenler = random.sample(TAROT_CARDS, 3)
@@ -361,31 +300,6 @@ async def tarot_command(update, context):
     except Exception as e: 
         await status.edit_text(f"Tüh bağlantı koptu (Sistem yoğun).\n\nHata Detayı: `{e}`")
 
-async def burcyorumla_command(update, context):
-    """ Ece Bot'taki Burç Sisteminin Birebir Aynısı """
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id != ADMIN_ID: return
-    
-    metin = update.message.text.lower()
-    temiz_args = re.sub(r'^/burcyorumla(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
-    
-    if not temiz_args:
-        await update.message.reply_text("❗ Bir burç ismi yazmalısın. Örnek: /burcyorumla akrep")
-        return
-
-    burc_input = turkce_karakter_duzelt(temiz_args)
-    if burc_input not in VALID_ZODIACS:
-        await update.message.reply_text("Mal mısın? Burç ismini doğru yaz.")
-        return
-
-    tz = pytz.timezone("Europe/Istanbul")
-    bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
-    yorum = HOROSCOPE_CACHE.get(burc_input)
-
-    if yorum == "": 
-        await update.message.reply_text("🛰️ Yıldızlar henüz uyanmadı. Zenithar güncellemeyi başlatana kadar veya gece güncellemesi yapılana kadar bekle.")
-    else: 
-        await update.message.reply_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
-
 # --- ADMİN KOMUTLARI ---
 
 async def getir_command(update, context):
@@ -409,17 +323,12 @@ async def kendin_yanitla_command(update, context):
         pending_replies[update.effective_user.id] = int(context.args[0].split('/')[-1])
         await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
 
-
 # --- ANA DÖNGÜ ---
 
 async def main():
     keep_alive()
-    asyncio.create_task(background_scheduler())
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    
-    scheduler = AsyncIOScheduler(timezone=pytz.timezone("Europe/Istanbul"))
-    scheduler.start()
 
     application.add_handler(CommandHandler("start", reject_private, filters=filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS))))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS)), reject_private))
@@ -429,7 +338,6 @@ async def main():
     application.add_handler(CommandHandler("duyuru", announce_command))
     application.add_handler(CommandHandler("yorumla", comment_command))
     application.add_handler(CommandHandler("tarotbak", tarot_command))
-    application.add_handler(CommandHandler("burcyorumla", burcyorumla_command))
     
     application.add_handler(CommandHandler("getir", getir_command))
     application.add_handler(CommandHandler("yanitla", admin_text_reply))
@@ -447,7 +355,7 @@ async def main():
 if __name__ == "__main__":
     try:
         print("Eski bot örneğinin (instance) kapanması bekleniyor...")
-        time.sleep(10)  # Çakışma önleyici bekleme süresi
+        time.sleep(10) 
         asyncio.run(main())
     except Exception as e:
         print(f"Kritik Hata: {e}")
