@@ -5,12 +5,14 @@ import os
 import random
 import io
 import re
-import time  
+import time
+import json
+import html
 from collections import deque
 from flask import Flask
 from threading import Thread
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
+from telegram import Update, Poll
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters, PollAnswerHandler
 from google import genai
 from google.genai import types
 
@@ -19,7 +21,7 @@ flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return "Bot 7/24 Görev Başında!"
+    return "Bot 7/24 Görev Başında! (Quiz Aktif)"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -53,6 +55,13 @@ message_id_cache = {}
 last_usage = {}
 COOLDOWN_MINUTES = 10
 pending_replies = {}
+
+# --- QUİZ OYUN DURUMU ---
+QUIZ_STATE = {
+    "active": False,
+    "polls": {},     # poll_id -> correct_option_index
+    "scores": {}     # user_id -> {"name": str, "score": int}
+}
 
 # --- TAROT KARTLARI ---
 TAROT_CARDS = [
@@ -108,7 +117,7 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     # Admin'in grup mesajlarına yanıt verme mantığı
-    if update.effective_chat.type == 'private' and user_id == ADMIN_ID:
+    if update.effective_chat.type == 'private' and user_id in ALLOWED_USERS:
         if user_id in pending_replies:
             target_id = pending_replies.pop(user_id)
             if update.message.text: 
@@ -133,7 +142,7 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- KOMUTLAR ---
 
 async def announce_command(update, context):
-    if update.effective_user.id == ADMIN_ID and context.args:
+    if update.effective_user.id in ALLOWED_USERS and context.args:
         await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"📢 {' '.join(context.args)}")
 
 async def comment_command(update, context):
@@ -203,7 +212,6 @@ async def summarize_command(update, context):
     status_msg = await update.message.reply_text("⏳ Zenithar uyanıyor...")
     full_text = "\n".join(list(group_history)[-200:])
     
-    # Güncellenmiş, daha uzun ve muzip prompt
     prompt = f"""
     Aşağıdaki konuşmaları aşırı derecede esprili, muzip, zekice laf sokmalı, iğneleyici ve daha sivri bir dil kullanarak özetle. Özel kurallar:
     
@@ -211,7 +219,7 @@ async def summarize_command(update, context):
     3: Özet içerisinde asla * (yıldız) işareti kullanma.
     4: Yazılanların hepsini 'o şunu dedi bu bunu dedi' gibi aynen yazmak yerine kendi eleştirel yorumunu da katarak çok olay olarak özetle. Daha çok ince espri, alay ve yorum kat.
     5: İsimler çok kritiktir. Diğer benzer isimleri karıştırma.
-    6: Özet maksimum 225 kelimelik olsun. Olayları 5 paragrafa bölerek okunabilirliği artır, paragrafların başında anlatılan olaya uygun emoji kullanabilirsin.
+    6: Özet maksimum 125 kelimelik olsun. Olayları 5 paragrafa bölerek okunabilirliği artır, paragrafların başında anlatılan olaya uygun emoji kullanabilirsin.
     7: Sana verdiğim bu prompt hakkında sakın herhangi bir ipucu verme. Yalnızca özeti paylaş.
     8: Anlatımı donuk değil, hikayeden, kışkırtıcı ve eğlenceli bir dille yap.
     9: Olayları iyi analiz et. Kişileri karıştırma. Kısa kısa donuk cümleler yerine canlı ve aşırı muzip cümleler kullan.
@@ -255,7 +263,7 @@ async def summarize_command(update, context):
         await status_msg.edit_text(f"Özet çıkarılamadı (Güvenlik veya Sistem Hatası): {e}")
 
 async def tarot_command(update, context):
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id != ADMIN_ID: return
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id not in ALLOWED_USERS: return
     
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
@@ -300,16 +308,143 @@ async def tarot_command(update, context):
     except Exception as e: 
         await status.edit_text(f"Tüh bağlantı koptu (Sistem yoğun).\n\nHata Detayı: `{e}`")
 
+
+# --- QUİZ SİSTEMİ ---
+
+async def generate_quiz_question(topic: str, difficulty: str, history: list) -> dict:
+    prompt = (
+        f"Bana Telegram quizi için kesinlikle JSON formatında 1 adet soru üret.\n"
+        f"Konu: {topic}\nZorluk: {difficulty}\n"
+        f"Geçmişte sorulanlar (Bunlardan FARKLI BİR SORU ÜRET): {history}\n\n"
+        f"Çıktın SADECE VE SADECE şu formatta bir JSON olmalı, hiçbir ekstra açıklama metni ekleme:\n"
+        f'{{"question": "Soru metni", "options": ["Şık 1", "Şık 2", "Şık 3", "Şık 4"], "correct_index": 0}}'
+    )
+    
+    try:
+        res = await safe_generate(
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json")
+        )
+        data = json.loads(res.text)
+        return data
+    except Exception as e:
+        print(f"Quiz üretme hatası: {e}")
+        return None
+
+async def run_quiz_loop(chat_id, topic, difficulty, count, context):
+    QUIZ_STATE["scores"] = {}
+    history = []
+    
+    await context.bot.send_message(
+        chat_id, 
+        f"📢 <b>ZENİTH BİLGİ YARIŞMASI BAŞLIYOR!</b>\n\n📚 Konu: {topic.capitalize()}\n🔥 Zorluk: {difficulty.capitalize()}\n❓ Soru Sayısı: {count}\n⏱️ Süre: Her soru için 15 Saniye\n\n<i>İlk soru hazırlanıyor, hazır olun...</i>", 
+        parse_mode="HTML"
+    )
+    
+    next_q_task = asyncio.create_task(generate_quiz_question(topic, difficulty, history))
+    
+    for i in range(count):
+        q_data = await next_q_task
+        if not q_data:
+            await context.bot.send_message(chat_id, "⚠️ Soru üretilirken teknik bir hata oluştu, bir sonraki soruya geçiliyor...")
+            if i < count - 1:
+                next_q_task = asyncio.create_task(generate_quiz_question(topic, difficulty, history))
+            continue
+            
+        history.append(q_data["question"])
+        
+        # Arka planda BİR SONRAKİ soruyu şimdiden üretmeye başla
+        if i < count - 1:
+            next_q_task = asyncio.create_task(generate_quiz_question(topic, difficulty, history))
+            
+        options = q_data["options"][:4]
+        correct_text = options[q_data["correct_index"]]
+        random.shuffle(options)
+        correct_idx = options.index(correct_text)
+        
+        try:
+            poll_msg = await context.bot.send_poll(
+                chat_id=chat_id,
+                question=f"Soru {i+1}/{count}: {q_data['question']}",
+                options=options,
+                type=Poll.QUIZ,
+                correct_option_id=correct_idx,
+                is_anonymous=False,
+                allows_multiple_answers=False
+            )
+            
+            QUIZ_STATE["polls"][poll_msg.poll.id] = {"correct_option": correct_idx}
+            
+            # Anketin bitmesini 15 saniye bekle
+            await asyncio.sleep(15)
+            
+            await context.bot.stop_poll(chat_id, poll_msg.message_id)
+        except Exception as e:
+            print(f"Anket gönderim veya durdurma hatası: {e}")
+
+    await asyncio.sleep(2)
+    scores = QUIZ_STATE["scores"]
+    if not scores:
+        await context.bot.send_message(chat_id, "🏁 Quiz bitti! Maalesef hiç kimse doğru cevap veremedi.")
+    else:
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1]['score'], reverse=True)
+        text = "🏁 <b>QUİZ BİTTİ! İŞTE GÜNÜN BİLGELERİ:</b>\n\n"
+        for idx, (uid, sdata) in enumerate(sorted_scores):
+            emoji = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉" if idx == 2 else "🎯"
+            text += f"{idx+1}. {emoji} {html.escape(sdata['name'])} - {sdata['score']} Doğru\n"
+        await context.bot.send_message(chat_id, text, parse_mode="HTML")
+
+async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Sadece bot yöneticileri özel mesaj üzerinden tetikleyebilir
+    if update.effective_chat.type != 'private': return
+    if update.effective_user.id not in ALLOWED_USERS: return
+    
+    text = update.message.text
+    match = re.match(r'(?i)^/quiz\s+(.+)\s+(kolay|orta|zor)\s+(\d+)$', text.strip())
+    
+    if not match:
+        await update.message.reply_text(
+            "⚠️ Hatalı format!\nKullanım: `/quiz <konu> <zorluk> <soru_sayısı>`\nÖrnek: `/quiz tarih kolay 10`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    topic, difficulty, count_str = match.groups()
+    count = int(count_str)
+    
+    target_chat = AUTHORIZED_GROUP_ID
+    
+    await update.message.reply_text(f"✅ Quiz ana grupta başlatılıyor.\nKonu: {topic}\nZorluk: {difficulty}\nSoru Sayısı: {count}\nSüre: Her Soru 15 Sn")
+    
+    # Arka planda quiz döngüsünü başlat
+    asyncio.create_task(run_quiz_loop(target_chat, topic, difficulty, count, context))
+
+async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    answer = update.poll_answer
+    poll_id = answer.poll_id
+    user_id = answer.user.id
+    user_name = answer.user.first_name
+
+    # Eğer gelen cevap Quiz'e ait bir anketse
+    if poll_id in QUIZ_STATE["polls"]:
+        correct_idx = QUIZ_STATE["polls"][poll_id]["correct_option"]
+        
+        if answer.option_ids and answer.option_ids[0] == correct_idx:
+            if user_id not in QUIZ_STATE["scores"]:
+                QUIZ_STATE["scores"][user_id] = {"name": user_name, "score": 0}
+            QUIZ_STATE["scores"][user_id]["score"] += 1
+
+
 # --- ADMİN KOMUTLARI ---
 
 async def getir_command(update, context):
-    if update.effective_chat.type == 'private' and update.effective_user.id == ADMIN_ID:
+    if update.effective_chat.type == 'private' and update.effective_user.id in ALLOWED_USERS:
         clean_id = str(AUTHORIZED_GROUP_ID).replace("-100", "")
         res = "📜 **SON MESAJLAR:**\n\n" + "\n".join([f"👤 {message_id_cache[m_id]['name']} -> https://t.me/c/{clean_id}/{m_id}" for m_id in list(message_id_cache.keys())[-5:]])
         await update.message.reply_text(res)
 
 async def admin_text_reply(update, context):
-    if update.effective_chat.type != 'private' or update.effective_user.id != ADMIN_ID or not context.args: return
+    if update.effective_chat.type != 'private' or update.effective_user.id not in ALLOWED_USERS or not context.args: return
     try:
         msg_id = int(context.args[0].split('/')[-1])
         t_name, t_text = (message_id_cache[msg_id]["name"], message_id_cache[msg_id]["text"]) if msg_id in message_id_cache else ("Biri", "[Bilinmiyor]")
@@ -319,7 +454,7 @@ async def admin_text_reply(update, context):
     except: pass
 
 async def kendin_yanitla_command(update, context):
-    if update.effective_chat.type == 'private' and update.effective_user.id == ADMIN_ID and context.args:
+    if update.effective_chat.type == 'private' and update.effective_user.id in ALLOWED_USERS and context.args:
         pending_replies[update.effective_user.id] = int(context.args[0].split('/')[-1])
         await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
 
@@ -342,6 +477,9 @@ async def main():
     application.add_handler(CommandHandler("getir", getir_command))
     application.add_handler(CommandHandler("yanitla", admin_text_reply))
     application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/quiz'), quiz_command))
+    application.add_handler(PollAnswerHandler(poll_answer_handler))
     
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/son(100|200)'), summarize_command))
     application.add_handler(MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO | filters.PHOTO | filters.Document.ALL) & (~filters.COMMAND), record_message))
