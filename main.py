@@ -46,6 +46,10 @@ ADMIN_ID = 7094870780
 SPECIAL_USER_ID = 8161908351
 ALLOWED_USERS = [ADMIN_ID, SPECIAL_USER_ID]
 
+# Yeni eklenen: Sticker yetkilileri ve engellenenler listesi
+STICKER_ADMINS = [652932220, 7094870780]
+blocked_stickers_list = []
+
 UNAUTHORIZED_IMAGE_URL = "https://i.ibb.co/bgq1t0kp/MG-8928.jpg"
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
@@ -458,6 +462,78 @@ async def kendin_yanitla_command(update, context):
         pending_replies[update.effective_user.id] = int(context.args[0].split('/')[-1])
         await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
 
+
+# --- YENİ STİCKER ENGELLEME FONKSİYONLARI ---
+
+async def sticker_engelle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in STICKER_ADMINS: return
+    if not update.message.reply_to_message or not update.message.reply_to_message.sticker:
+        await update.message.reply_text("⚠️ Lütfen engellemek istediğiniz bir stickera yanıt vererek bu komutu kullanın.")
+        return
+
+    target_sticker_msg = update.message.reply_to_message
+    sticker = target_sticker_msg.sticker
+    unique_id = sticker.file_unique_id
+    
+    # Sticker daha önce engellenmiş mi kontrol et
+    if any(s['unique_id'] == unique_id for s in blocked_stickers_list):
+        await update.message.reply_text("⚠️ Bu sticker zaten yasaklı listesinde.")
+        return
+
+    # Sticker'ı kimin attığını bul
+    adder_name = target_sticker_msg.from_user.first_name
+    emoji = sticker.emoji or "❓"
+    
+    blocked_stickers_list.append({
+        "unique_id": unique_id,
+        "added_by": adder_name,
+        "emoji": emoji
+    })
+
+    try:
+        await target_sticker_msg.delete()
+        await update.message.reply_text(f"✅ Sticker başarıyla engellendi ve silindi.\n(Atan Kişi: {adder_name})")
+    except Exception as e:
+        await update.message.reply_text(f"✅ Sticker listeye eklendi ancak silinemedi (Yetki yok veya çok eski mesaj).")
+
+async def engelli_stickerlar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in STICKER_ADMINS: return
+    if not blocked_stickers_list:
+        await update.message.reply_text("📜 Şu an yasaklı hiçbir sticker bulunmuyor.")
+        return
+    
+    text = "🚫 <b>Yasaklı Stickerlar Listesi:</b>\n\n"
+    for i, s in enumerate(blocked_stickers_list, 1):
+        text += f"{i}. Sticker {s['emoji']} (Atan: {html.escape(s['added_by'])})\n"
+    
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def sticker_serbest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in STICKER_ADMINS: return
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("⚠️ Lütfen bir liste numarası belirtin. Örn: `/stickerserbest 1`")
+        return
+        
+    index = int(context.args[0]) - 1
+    if index < 0 or index >= len(blocked_stickers_list):
+        await update.message.reply_text("⚠️ Geçersiz liste numarası. Doğru numarayı `/engellistickerlar` ile bulabilirsiniz.")
+        return
+        
+    removed = blocked_stickers_list.pop(index)
+    await update.message.reply_text(f"✅ {index + 1}. sıradaki sticker ({removed['emoji']}) yasağı kaldırıldı.")
+
+async def check_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Gruba gelen tüm stickerları dinleyip engelli ise silecek fonksiyon
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
+    if update.message and update.message.sticker:
+        unique_id = update.message.sticker.file_unique_id
+        if any(s['unique_id'] == unique_id for s in blocked_stickers_list):
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+
+
 # --- ANA DÖNGÜ ---
 
 async def main():
@@ -477,6 +553,12 @@ async def main():
     application.add_handler(CommandHandler("getir", getir_command))
     application.add_handler(CommandHandler("yanitla", admin_text_reply))
     application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
+    
+    # Yeni Sticker Komutları ve Filtresi
+    application.add_handler(CommandHandler("stickerengelle", sticker_engelle_command))
+    application.add_handler(CommandHandler("engellistickerlar", engelli_stickerlar_command))
+    application.add_handler(CommandHandler("stickerserbest", sticker_serbest_command))
+    application.add_handler(MessageHandler(filters.Sticker.ALL, check_sticker))
     
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/quiz'), quiz_command))
     application.add_handler(PollAnswerHandler(poll_answer_handler))
