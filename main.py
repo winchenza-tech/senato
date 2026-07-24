@@ -492,14 +492,14 @@ async def sticker_engelle_command(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         await target_sticker_msg.delete()
-        await update.message.reply_text(f"✅ Sticker başarıyla engellendi ve silindi.\n(Atan Kişi: {adder_name})")
+        await update.message.reply_text(f"Bu iğrenç sticker engellendi ve silindi.\n(Atan Kişi: {adder_name})")
     except Exception as e:
-        await update.message.reply_text(f"✅ Sticker listeye eklendi ancak silinemedi (Yetki yok veya çok eski mesaj).")
+        await update.message.reply_text(f"Sticker listeye eklendi ancak silinemedi :(")
 
 async def engelli_stickerlar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in STICKER_ADMINS: return
     if not blocked_stickers_list:
-        await update.message.reply_text("📜 Şu an yasaklı hiçbir sticker bulunmuyor.")
+        await update.message.reply_text("📜 Şu an yasaklı sticker yok.")
         return
     
     text = "🚫 <b>Yasaklı Stickerlar Listesi:</b>\n\n"
@@ -511,16 +511,16 @@ async def engelli_stickerlar_command(update: Update, context: ContextTypes.DEFAU
 async def sticker_serbest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in STICKER_ADMINS: return
     if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("⚠️ Lütfen bir liste numarası belirtin. Örn: `/stickerserbest 1`")
+        await update.message.reply_text("Bir liste numarası gir. Örnepin: `/stickerserbest 1`")
         return
         
     index = int(context.args[0]) - 1
     if index < 0 or index >= len(blocked_stickers_list):
-        await update.message.reply_text("⚠️ Geçersiz liste numarası. Doğru numarayı `/engellistickerlar` ile bulabilirsiniz.")
+        await update.message.reply_text("Geçersiz numarası. Doğru numarayı `/engellistickerlar` ile bulabilirsin")
         return
         
     removed = blocked_stickers_list.pop(index)
-    await update.message.reply_text(f"✅ {index + 1}. sıradaki sticker ({removed['emoji']}) yasağı kaldırıldı.")
+    await update.message.reply_text(f"✅ {index + 1}. sıradaki sticker ({removed['emoji']}) yasağı kaldırdım")
 
 async def check_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Gruba gelen tüm stickerları dinleyip engelli ise silecek fonksiyon
