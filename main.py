@@ -306,7 +306,6 @@ async def tarot_command(update, context):
         res = await gen_task
         tarot_image = f"https://image.pollinations.ai/prompt/mystical_tarot_cards_reading_table_with_three_cards_on_it?width=800&height=400&nologo=true"
         await status.delete()
-        # NOT KISMI BURAYA EKLENDİ
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
             photo=tarot_image,
@@ -373,7 +372,7 @@ async def burc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     veri = HOROSCOPE_MEMORY.get(komut)
     if veri:
-        metin = f"{veri['yorum']}\n\nNot: Telegramda kendini savcı, polis ve falcı AKREP olarak tanıtanlara itibar etmeyiniz."
+        metin = f"{veri['yorum']}\n\nNot: Telegramda kendini savcı, polis ve AKREP olarak tanıtan falcılara itibar etmeyiniz."
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
             photo=veri["banner"],
@@ -383,7 +382,8 @@ async def burc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # YANLIŞ BURÇ İSMİ (VEYA YANLIŞ KOMUT) UYARISI
 async def yanlis_burc_kontrolu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id not in ALLOWED_USERS: return
-    await update.message.reply_text("mal mısın burç ismini doğru yaz")
+    if update.message and update.message.text:
+        await update.message.reply_text("mal mısın burç ismini doğru yaz")
 
 
 # --- QUİZ SİSTEMİ ---
@@ -531,7 +531,7 @@ async def kendin_yanitla_command(update, context):
         await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
 
 
-# --- YENİ STİCKER ENGELLEME FONKSİYONLARI ---
+# --- STİCKER ENGELLEME FONKSİYONLARI ---
 
 async def sticker_engelle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in STICKER_ADMINS: return
@@ -606,9 +606,9 @@ async def main():
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
+    # Orijinal Komutlar
     application.add_handler(CommandHandler("start", reject_private, filters=filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS))))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS)), reject_private))
-    
     application.add_handler(MessageHandler(filters.ChatType.GROUPS & (~filters.Chat(chat_id=AUTHORIZED_GROUP_ID)), reject_unauthorized_group))
 
     application.add_handler(CommandHandler("duyuru", announce_command))
@@ -619,11 +619,12 @@ async def main():
     application.add_handler(CommandHandler("yanitla", admin_text_reply))
     application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
     
-    # YENİ BURÇ KOMUTLARI EKLENDİ
     application.add_handler(CommandHandler("update", update_burclar_command))
-    application.add_handler(CommandHandler(VALID_ZODIACS, burc_command))
 
-    # YENİ STICKER KOMUTLARI EKLENDİ
+    # YENİ VE DÜZELTİLMİŞ BURÇ SİSTEMİ (Regex sayesinde çökme önlendi, tüm türkçe ve ingilizce varyasyonları yakalar)
+    burc_pattern = r'(?i)^/(' + '|'.join(VALID_ZODIACS) + r')(?:\s|$)'
+    application.add_handler(MessageHandler(filters.Regex(burc_pattern), burc_command))
+
     application.add_handler(CommandHandler("stickerengelle", sticker_engelle_command))
     application.add_handler(CommandHandler("engellistickerlar", engelli_stickerlar_command))
     application.add_handler(CommandHandler("stickerserbest", sticker_serbest_command))
@@ -634,10 +635,10 @@ async def main():
     
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/son(100|200)'), summarize_command))
     
-    # EĞER TANIMLANMAYAN/YANLIŞ BİR KOMUT (örn: /araba) GİRİLİRSE, UYARI VERİR
-    application.add_handler(MessageHandler(filters.COMMAND, yanlis_burc_kontrolu))
+    # YENİ FALLBACK SİSTEMİ: Yukarıdaki hiçbir komuta uymayan ve "/" ile başlayan (Örn: /araba, /hebele) her yazıda uyarı verecek.
+    application.add_handler(MessageHandler(filters.Regex(r'^/'), yanlis_burc_kontrolu))
     
-    # GENEL MESAJ KAYIT YAKALAYICISI (KOMUT OLMAYANLAR)
+    # Kalan Genel Mesajların Kaydı
     application.add_handler(MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO | filters.PHOTO | filters.Document.ALL) & (~filters.COMMAND), record_message))
 
     await application.initialize()
