@@ -309,7 +309,7 @@ async def tarot_command(update, context):
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
             photo=tarot_image,
-            caption=f"🔮 <b>TAROT FALI:</b>\n\n🃏 Seçilen Kartlar: {', '.join(secilenler)}\n\n{res.text}\n\nNot: Telegramda kendini savcı, polis ve AKREP olarak tanıtan falcılara itibar etmeyiniz.",
+            caption=f"🔮 <b>TAROT FALI:</b>\n\n🃏 Seçilen Kartlar: {', '.join(secilenler)}\n\n{res.text}\n\nNot: Telegramda kendini savcı, polis ve falcı akrep olarak tanıtan şahıslara itibar etmeyiniz.",
             parse_mode='HTML'
         )
     except Exception as e: 
