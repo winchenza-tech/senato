@@ -372,7 +372,7 @@ async def burc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     veri = HOROSCOPE_MEMORY.get(komut)
     if veri:
-        metin = f"{veri['yorum']}\n\nNot: Telegramda kendini savcı, polis ve falcı AKREP olarak tanıtanlara itibar etmeyiniz."
+        metin = f"{veri['yorum']}\n\nNOT:Telegramda kendini savcı, polis ve falcı AKREP olarak tanıtanlara itibar etmeyiniz."
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
             photo=veri["banner"],
