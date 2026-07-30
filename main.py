@@ -1,4 +1,4 @@
-import asyncio
+Import asyncio
 import nest_asyncio
 import datetime
 import os
@@ -46,6 +46,7 @@ ADMIN_ID = 7094870780
 SPECIAL_USER_ID = 8161908351
 ALLOWED_USERS = [ADMIN_ID, SPECIAL_USER_ID]
 
+# Yeni eklenen: Sticker yetkilileri ve engellenenler listesi
 STICKER_ADMINS = [652932220, 7094870780]
 blocked_stickers_list = []
 
@@ -62,8 +63,8 @@ pending_replies = {}
 # --- QUİZ OYUN DURUMU ---
 QUIZ_STATE = {
     "active": False,
-    "polls": {},     
-    "scores": {}     
+    "polls": {},     # poll_id -> correct_option_index
+    "scores": {}     # user_id -> {"name": str, "score": int}
 }
 
 # --- TAROT KARTLARI ---
@@ -74,17 +75,10 @@ TAROT_CARDS = [
     "Ay", "Güneş", "Mahkeme", "Dünya"
 ]
 
-# --- BURÇ YORUMLARI HAFIZASI VE GEÇERLİ LİSTE ---
-HOROSCOPE_MEMORY = {}
-VALID_ZODIACS = [
-    "koc", "koç", "boga", "boğa", "ikizler", "yengec", "yengeç", 
-    "aslan", "basak", "başak", "terazi", "akrep", "yay", 
-    "oglak", "oğlak", "kova", "balik", "balık"
-]
-
 # --- YARDIMCI FONKSİYONLAR ---
 
 async def safe_generate(contents, config=None, retries=5):
+    """API Çökmelerini Önleyen Güvenli Üretici"""
     for attempt in range(retries):
         try:
             res = await client.aio.models.generate_content(
@@ -126,6 +120,7 @@ async def reject_unauthorized_group(update: Update, context: ContextTypes.DEFAUL
 async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
+    # Admin'in grup mesajlarına yanıt verme mantığı
     if update.effective_chat.type == 'private' and user_id in ALLOWED_USERS:
         if user_id in pending_replies:
             target_id = pending_replies.pop(user_id)
@@ -137,6 +132,7 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_audio(chat_id=AUTHORIZED_GROUP_ID, audio=update.message.audio.file_id, reply_to_message_id=target_id)
             return
 
+    # Grup mesajlarını kaydetme
     if update.effective_chat.id == AUTHORIZED_GROUP_ID and update.message:
         text = update.message.text or update.message.caption
         if text:
@@ -154,6 +150,7 @@ async def announce_command(update, context):
         await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"📢 {' '.join(context.args)}")
 
 async def comment_command(update, context):
+    """ /yorumla komutu """
     if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
     target = update.message.reply_to_message
     t_name = target.from_user.first_name
@@ -309,81 +306,11 @@ async def tarot_command(update, context):
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
             photo=tarot_image,
-            caption=f"🔮 <b>TAROT FALI:</b>\n\n🃏 Seçilen Kartlar: {', '.join(secilenler)}\n\n{res.text}\n\nNot: Telegramda kendini savcı, polis ve falcı akrep olarak tanıtan şahıslara itibar etmeyiniz.",
+            caption=f"🔮 <b>TAROT FALI:</b>\n\n🃏 Seçilen Kartlar: {', '.join(secilenler)}\n\n{res.text}",
             parse_mode='HTML'
         )
     except Exception as e: 
         await status.edit_text(f"Tüh bağlantı koptu (Sistem yoğun).\n\nHata Detayı: `{e}`")
-
-# --- YENİ BURÇ SİSTEMİ FONKSİYONLARI ---
-
-async def update_burclar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ALLOWED_USERS: return
-    
-    status_msg = await update.message.reply_text("⏳ Yıldızların fısıltıları dinleniyor, burç yorumları çekiliyor...")
-    
-    prompt = """Bana 12 burç için günlük, samimi ve anlaşılır burç yorumları üret. 
-    Kurallar:
-    - Her burç için yorum maksimum 80 kelime olmalı.
-    - 2 paragraf halinde yaz, paragrafların başında uygun emoji bulunsun.
-    - Çıktıyı SADECE aşağıdaki gibi JSON formatında ver, başka hiçbir metin ekleme:
-    {"koç": "...", "boğa": "...", "ikizler": "...", "yengeç": "...", "aslan": "...", "başak": "...", "terazi": "...", "akrep": "...", "yay": "...", "oğlak": "...", "kova": "...", "balık": "..."}"""
-    
-    try:
-        res = await safe_generate(
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json")
-        )
-        data = json.loads(res.text)
-        
-        mapping = {
-            "koc": "koç", "koç": "koç",
-            "boga": "boğa", "boğa": "boğa",
-            "ikizler": "ikizler",
-            "yengec": "yengeç", "yengeç": "yengeç",
-            "aslan": "aslan",
-            "basak": "başak", "başak": "başak",
-            "terazi": "terazi",
-            "akrep": "akrep",
-            "yay": "yay",
-            "oglak": "oğlak", "oğlak": "oğlak",
-            "kova": "kova",
-            "balik": "balık", "balık": "balık"
-        }
-        
-        for key, val in mapping.items():
-            yorum = data.get(val, "🌟 Bugün yıldızlar senin için dinleniyor. İçindeki sese güven!\n\n✨ Güne pozitif başla.")
-            HOROSCOPE_MEMORY[key] = {
-                "banner": "https://image.pollinations.ai/prompt/astrology_zodiac_signs_glowing_in_starry_galaxy_background_banner?width=800&height=400&nologo=true",
-                "yorum": yorum
-            }
-        await status_msg.edit_text("✅ Günlük burç yorumları başarıyla hafızaya alındı!")
-    except Exception as e:
-        await status_msg.edit_text(f"❌ Burçlar çekilirken hata oluştu: {e}")
-
-async def burc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id not in ALLOWED_USERS: return
-    
-    komut = update.message.text.split()[0][1:].lower()
-    
-    if not HOROSCOPE_MEMORY:
-        await update.message.reply_text("Yorumlar henüz çekilmedi. Lütfen adminin /update yapmasını bekleyin.")
-        return
-        
-    veri = HOROSCOPE_MEMORY.get(komut)
-    if veri:
-        metin = f"{veri['yorum']}\n\nNOT:Telegramda kendini savcı, polis ve falcı AKREP olarak tanıtanlara itibar etmeyiniz."
-        await context.bot.send_photo(
-            chat_id=update.effective_chat.id,
-            photo=veri["banner"],
-            caption=metin
-        )
-
-# YANLIŞ BURÇ İSMİ (VEYA YANLIŞ KOMUT) UYARISI
-async def yanlis_burc_kontrolu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID and update.effective_user.id not in ALLOWED_USERS: return
-    if update.message and update.message.text:
-        await update.message.reply_text("mal mısın burç ismini doğru yaz")
 
 
 # --- QUİZ SİSTEMİ ---
@@ -430,6 +357,7 @@ async def run_quiz_loop(chat_id, topic, difficulty, count, context):
             
         history.append(q_data["question"])
         
+        # Arka planda BİR SONRAKİ soruyu şimdiden üretmeye başla
         if i < count - 1:
             next_q_task = asyncio.create_task(generate_quiz_question(topic, difficulty, history))
             
@@ -451,6 +379,7 @@ async def run_quiz_loop(chat_id, topic, difficulty, count, context):
             
             QUIZ_STATE["polls"][poll_msg.poll.id] = {"correct_option": correct_idx}
             
+            # Anketin bitmesini 15 saniye bekle
             await asyncio.sleep(15)
             
             await context.bot.stop_poll(chat_id, poll_msg.message_id)
@@ -470,6 +399,7 @@ async def run_quiz_loop(chat_id, topic, difficulty, count, context):
         await context.bot.send_message(chat_id, text, parse_mode="HTML")
 
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Sadece bot yöneticileri özel mesaj üzerinden tetikleyebilir
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ALLOWED_USERS: return
     
@@ -490,6 +420,7 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(f"✅ Quiz ana grupta başlatılıyor.\nKonu: {topic}\nZorluk: {difficulty}\nSoru Sayısı: {count}\nSüre: Her Soru 15 Sn")
     
+    # Arka planda quiz döngüsünü başlat
     asyncio.create_task(run_quiz_loop(target_chat, topic, difficulty, count, context))
 
 async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -498,6 +429,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = answer.user.id
     user_name = answer.user.first_name
 
+    # Eğer gelen cevap Quiz'e ait bir anketse
     if poll_id in QUIZ_STATE["polls"]:
         correct_idx = QUIZ_STATE["polls"][poll_id]["correct_option"]
         
@@ -531,7 +463,7 @@ async def kendin_yanitla_command(update, context):
         await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
 
 
-# --- STİCKER ENGELLEME FONKSİYONLARI ---
+# --- YENİ STİCKER ENGELLEME FONKSİYONLARI ---
 
 async def sticker_engelle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in STICKER_ADMINS: return
@@ -543,10 +475,12 @@ async def sticker_engelle_command(update: Update, context: ContextTypes.DEFAULT_
     sticker = target_sticker_msg.sticker
     unique_id = sticker.file_unique_id
     
+    # Sticker daha önce engellenmiş mi kontrol et
     if any(s['unique_id'] == unique_id for s in blocked_stickers_list):
         await update.message.reply_text("⚠️ Bu sticker zaten yasaklı listesinde.")
         return
 
+    # Sticker'ı kimin attığını bul
     adder_name = target_sticker_msg.from_user.first_name
     emoji = sticker.emoji or "❓"
     
@@ -589,6 +523,7 @@ async def sticker_serbest_command(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(f"✅ {index + 1}. sıradaki sticker ({removed['emoji']}) yasağı kaldırdım")
 
 async def check_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Gruba gelen tüm stickerları dinleyip engelli ise silecek fonksiyon
     if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
     if update.message and update.message.sticker:
         unique_id = update.message.sticker.file_unique_id
@@ -606,9 +541,9 @@ async def main():
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # Orijinal Komutlar
     application.add_handler(CommandHandler("start", reject_private, filters=filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS))))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS)), reject_private))
+    
     application.add_handler(MessageHandler(filters.ChatType.GROUPS & (~filters.Chat(chat_id=AUTHORIZED_GROUP_ID)), reject_unauthorized_group))
 
     application.add_handler(CommandHandler("duyuru", announce_command))
@@ -619,12 +554,7 @@ async def main():
     application.add_handler(CommandHandler("yanitla", admin_text_reply))
     application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
     
-    application.add_handler(CommandHandler("update", update_burclar_command))
-
-    # YENİ VE DÜZELTİLMİŞ BURÇ SİSTEMİ (Regex sayesinde çökme önlendi, tüm türkçe ve ingilizce varyasyonları yakalar)
-    burc_pattern = r'(?i)^/(' + '|'.join(VALID_ZODIACS) + r')(?:\s|$)'
-    application.add_handler(MessageHandler(filters.Regex(burc_pattern), burc_command))
-
+    # Yeni Sticker Komutları ve Filtresi
     application.add_handler(CommandHandler("stickerengelle", sticker_engelle_command))
     application.add_handler(CommandHandler("engellistickerlar", engelli_stickerlar_command))
     application.add_handler(CommandHandler("stickerserbest", sticker_serbest_command))
@@ -634,11 +564,6 @@ async def main():
     application.add_handler(PollAnswerHandler(poll_answer_handler))
     
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/son(100|200)'), summarize_command))
-    
-    # YENİ FALLBACK SİSTEMİ: Yukarıdaki hiçbir komuta uymayan ve "/" ile başlayan (Örn: /araba, /hebele) her yazıda uyarı verecek.
-    application.add_handler(MessageHandler(filters.Regex(r'^/'), yanlis_burc_kontrolu))
-    
-    # Kalan Genel Mesajların Kaydı
     application.add_handler(MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO | filters.PHOTO | filters.Document.ALL) & (~filters.COMMAND), record_message))
 
     await application.initialize()
