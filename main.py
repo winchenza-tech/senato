@@ -129,7 +129,7 @@ async def oynat_command(update, context):
         stream_url = info.get('url') or info.get('entries', [{}])[0].get('url')
         await call_py.join_group_call(update.effective_chat.id, MediaStream(stream_url))
         await status_msg.edit_text(f"▶️ Oynatıtyor: {html.escape(info.get('title', 'Medya'))}")
-    except Exception as e: await status_msg.edit_text(f"❌ Hata: {e}")
+    except Exception as e: await status_msg.edit_text(f"opss beceremedim: {e}")
 
 async def durdur_command(update, context):
     try:
