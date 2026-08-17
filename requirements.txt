@@ -2,7 +2,7 @@ python-telegram-bot
 google-genai
 flask
 nest-asyncio
-pyrogram==2.0.106
+kurigram
 tgcrypto
 py-tgcalls
 yt-dlp
