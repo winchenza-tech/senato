@@ -5,4 +5,4 @@ nest-asyncio
 kurigram
 tgcrypto
 py-tgcalls
-yt-dlp
+aiohttp
