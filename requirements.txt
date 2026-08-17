@@ -3,5 +3,5 @@ google-genai
 flask
 nest-asyncio
 pyrogram
-pytgcalls
+pytgcalls==1.0.0
 yt-dlp
