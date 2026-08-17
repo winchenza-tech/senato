@@ -4,5 +4,5 @@ flask
 nest-asyncio
 pyrogram==2.0.106
 tgcrypto
-pytgcalls
+py-tgcalls
 yt-dlp
