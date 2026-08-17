@@ -3,5 +3,6 @@ google-genai
 flask
 nest-asyncio
 pyrogram
-py-tgcalls
+tgcrypto
+pytgcalls>=3.0.0
 yt-dlp
