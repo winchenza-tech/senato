@@ -1,7 +1,7 @@
 python-telegram-bot
 google-genai
 flask
-requests
-apscheduler
-pytz
 nest-asyncio
+pyrogram
+pytgcalls
+yt-dlp
