@@ -127,13 +127,17 @@ async def oynat_command(update, context):
         ydl_opts = {'format': 'best[height<=480]/best', 'quiet': True, 'noplaylist': True}
         info = await asyncio.get_event_loop().run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=False))
         stream_url = info.get('url') or info.get('entries', [{}])[0].get('url')
-        await call_py.join_group_call(update.effective_chat.id, MediaStream(stream_url))
+        
+        # Modern py-tgcalls API
+        await call_py.play(update.effective_chat.id, MediaStream(stream_url))
+        
         await status_msg.edit_text(f"▶️ Oynatıtyor: {html.escape(info.get('title', 'Medya'))}")
     except Exception as e: await status_msg.edit_text(f"opss beceremedim: {e}")
 
 async def durdur_command(update, context):
     try:
-        await call_py.leave_group_call(update.effective_chat.id)
+        # Modern py-tgcalls API
+        await call_py.leave_call(update.effective_chat.id)
         await update.message.reply_text("⏹️ Durdurul.")
     except: pass
 
@@ -151,6 +155,11 @@ async def comment_command(update, context):
         prompt = f"HEDEF: {t_name}, MESAJI: {target_text}. Sivri dilli, küfürlü bir şekilde aşağıla, max 25 kelime, yıldız (*) kullanma."
         res = await safe_generate(contents=prompt)
         await target.reply_text(f"💀 {res.text}")
+
+# Sticker kontrol fonksiyonu eksikti, basit bir placeholder eklendi
+async def check_sticker(update, context):
+    # Buraya kendi sticker engelleme mantığını yazabilirsin
+    pass
 
 # --- ANA DÖNGÜ ---
 async def main():
