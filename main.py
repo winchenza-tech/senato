@@ -16,12 +16,6 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, Comma
 from google import genai
 from google.genai import types
 
-# Sesli sohbet + Cobalt için
-import aiohttp
-from pyrogram import Client as PyroClient
-from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream
-
 # --- 1. WEB SUNUCUSU ---
 flask_app = Flask(__name__)
 
@@ -52,6 +46,7 @@ ADMIN_ID = 7094870780
 SPECIAL_USER_ID = 8161908351
 ALLOWED_USERS = [ADMIN_ID, SPECIAL_USER_ID]
 
+# Yeni eklenen: Sticker yetkilileri ve engellenenler listesi
 STICKER_ADMINS = [652932220, 7094870780]
 blocked_stickers_list = []
 
@@ -65,17 +60,11 @@ last_usage = {}
 COOLDOWN_MINUTES = 10
 pending_replies = {}
 
-# --- SESLİ SOHBET (VC) AYARLARI ---
-API_ID = int(os.environ.get("API_ID", 6))
-API_HASH = os.environ.get("API_HASH", "eb06d4abfb49dc3eeb1aeb98ae0f581e")
-pyro_app = PyroClient("vc_bot", api_id=API_ID, api_hash=API_HASH, bot_token=TELEGRAM_TOKEN)
-call_py = PyTgCalls(pyro_app)
-
 # --- QUİZ OYUN DURUMU ---
 QUIZ_STATE = {
     "active": False,
-    "polls": {},
-    "scores": {}
+    "polls": {},     # poll_id -> correct_option_index
+    "scores": {}     # user_id -> {"name": str, "score": int}
 }
 
 # --- TAROT KARTLARI ---
@@ -89,6 +78,7 @@ TAROT_CARDS = [
 # --- YARDIMCI FONKSİYONLAR ---
 
 async def safe_generate(contents, config=None, retries=5):
+    """API Çökmelerini Önleyen Güvenli Üretici"""
     for attempt in range(retries):
         try:
             res = await client.aio.models.generate_content(
@@ -103,7 +93,7 @@ async def safe_generate(contents, config=None, retries=5):
                 raise e 
             await asyncio.sleep(5) 
 
-# --- BOT FONKSİYONLARI ---
+# --- 3. BOT FONKSİYONLARI ---
 
 async def reject_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message: return
@@ -130,6 +120,7 @@ async def reject_unauthorized_group(update: Update, context: ContextTypes.DEFAUL
 async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
+    # Admin'in grup mesajlarına yanıt verme mantığı
     if update.effective_chat.type == 'private' and user_id in ALLOWED_USERS:
         if user_id in pending_replies:
             target_id = pending_replies.pop(user_id)
@@ -141,6 +132,7 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_audio(chat_id=AUTHORIZED_GROUP_ID, audio=update.message.audio.file_id, reply_to_message_id=target_id)
             return
 
+    # Grup mesajlarını kaydetme
     if update.effective_chat.id == AUTHORIZED_GROUP_ID and update.message:
         text = update.message.text or update.message.caption
         if text:
@@ -151,57 +143,14 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(message_id_cache) > 50: 
                 del message_id_cache[next(iter(message_id_cache))]
 
-# --- SESLİ SOHBET KOMUTLARI (Cobalt) ---
-
-async def oynat_command(update, context):
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID or not context.args:
-        return
-
-    url = context.args[0]
-    status_msg = await update.message.reply_text("⏳ Cobalt ile işleniyor...")
-
-    try:
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "url": url,
-            "videoQuality": "480",
-            "downloadMode": "auto"
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post("https://cobaltapi.kittycat.boo/", json=payload, headers=headers) as resp:
-                data = await resp.json()
-
-        if data.get("status") in ["tunnel", "redirect"] and data.get("url"):
-            stream_url = data["url"]
-            title = data.get("filename", "Medya")
-
-            await call_py.play(update.effective_chat.id, MediaStream(stream_url))
-            await status_msg.edit_text(f"▶️ Oynatılıyor: {html.escape(str(title))}")
-        else:
-            error_msg = data.get("error", {}).get("code", "Bilinmeyen hata")
-            await status_msg.edit_text(f"opss beceremedim: {error_msg}")
-
-    except Exception as e:
-        await status_msg.edit_text(f"opss beceremedim: {e}")
-
-async def durdur_command(update, context):
-    try:
-        await call_py.leave_call(update.effective_chat.id)
-        await update.message.reply_text("⏹️ Durduruldu.")
-    except:
-        pass
-
-# --- DİĞER KOMUTLAR ---
+# --- KOMUTLAR ---
 
 async def announce_command(update, context):
     if update.effective_user.id in ALLOWED_USERS and context.args:
         await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"📢 {' '.join(context.args)}")
 
 async def comment_command(update, context):
+    """ /yorumla komutu """
     if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
     target = update.message.reply_to_message
     t_name = target.from_user.first_name
@@ -363,6 +312,7 @@ async def tarot_command(update, context):
     except Exception as e: 
         await status.edit_text(f"Tüh bağlantı koptu (Sistem yoğun).\n\nHata Detayı: `{e}`")
 
+
 # --- QUİZ SİSTEMİ ---
 
 async def generate_quiz_question(topic: str, difficulty: str, history: list) -> dict:
@@ -407,6 +357,7 @@ async def run_quiz_loop(chat_id, topic, difficulty, count, context):
             
         history.append(q_data["question"])
         
+        # Arka planda BİR SONRAKİ soruyu şimdiden üretmeye başla
         if i < count - 1:
             next_q_task = asyncio.create_task(generate_quiz_question(topic, difficulty, history))
             
@@ -428,6 +379,7 @@ async def run_quiz_loop(chat_id, topic, difficulty, count, context):
             
             QUIZ_STATE["polls"][poll_msg.poll.id] = {"correct_option": correct_idx}
             
+            # Anketin bitmesini 15 saniye bekle
             await asyncio.sleep(15)
             
             await context.bot.stop_poll(chat_id, poll_msg.message_id)
@@ -447,6 +399,7 @@ async def run_quiz_loop(chat_id, topic, difficulty, count, context):
         await context.bot.send_message(chat_id, text, parse_mode="HTML")
 
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Sadece bot yöneticileri özel mesaj üzerinden tetikleyebilir
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ALLOWED_USERS: return
     
@@ -467,6 +420,7 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(f"✅ Quiz ana grupta başlatılıyor.\nKonu: {topic}\nZorluk: {difficulty}\nSoru Sayısı: {count}\nSüre: Her Soru 15 Sn")
     
+    # Arka planda quiz döngüsünü başlat
     asyncio.create_task(run_quiz_loop(target_chat, topic, difficulty, count, context))
 
 async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -475,6 +429,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = answer.user.id
     user_name = answer.user.first_name
 
+    # Eğer gelen cevap Quiz'e ait bir anketse
     if poll_id in QUIZ_STATE["polls"]:
         correct_idx = QUIZ_STATE["polls"][poll_id]["correct_option"]
         
@@ -482,6 +437,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             if user_id not in QUIZ_STATE["scores"]:
                 QUIZ_STATE["scores"][user_id] = {"name": user_name, "score": 0}
             QUIZ_STATE["scores"][user_id]["score"] += 1
+
 
 # --- ADMİN KOMUTLARI ---
 
@@ -506,7 +462,8 @@ async def kendin_yanitla_command(update, context):
         pending_replies[update.effective_user.id] = int(context.args[0].split('/')[-1])
         await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
 
-# --- STİCKER ENGELLEME ---
+
+# --- YENİ STİCKER ENGELLEME FONKSİYONLARI ---
 
 async def sticker_engelle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in STICKER_ADMINS: return
@@ -518,10 +475,12 @@ async def sticker_engelle_command(update: Update, context: ContextTypes.DEFAULT_
     sticker = target_sticker_msg.sticker
     unique_id = sticker.file_unique_id
     
+    # Sticker daha önce engellenmiş mi kontrol et
     if any(s['unique_id'] == unique_id for s in blocked_stickers_list):
         await update.message.reply_text("⚠️ Bu sticker zaten yasaklı listesinde.")
         return
 
+    # Sticker'ı kimin attığını bul
     adder_name = target_sticker_msg.from_user.first_name
     emoji = sticker.emoji or "❓"
     
@@ -564,6 +523,7 @@ async def sticker_serbest_command(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(f"✅ {index + 1}. sıradaki sticker ({removed['emoji']}) yasağı kaldırdım")
 
 async def check_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Gruba gelen tüm stickerları dinleyip engelli ise silecek fonksiyon
     if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
     if update.message and update.message.sticker:
         unique_id = update.message.sticker.file_unique_id
@@ -573,13 +533,11 @@ async def check_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
+
 # --- ANA DÖNGÜ ---
 
 async def main():
     keep_alive()
-    
-    await pyro_app.start()
-    await call_py.start()
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -587,10 +545,6 @@ async def main():
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (~filters.User(ALLOWED_USERS)), reject_private))
     
     application.add_handler(MessageHandler(filters.ChatType.GROUPS & (~filters.Chat(chat_id=AUTHORIZED_GROUP_ID)), reject_unauthorized_group))
-
-    # Sesli sohbet
-    application.add_handler(CommandHandler("oynat", oynat_command))
-    application.add_handler(CommandHandler("durdur", durdur_command))
 
     application.add_handler(CommandHandler("duyuru", announce_command))
     application.add_handler(CommandHandler("yorumla", comment_command))
@@ -600,7 +554,7 @@ async def main():
     application.add_handler(CommandHandler("yanitla", admin_text_reply))
     application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
     
-    # Sticker
+    # Yeni Sticker Komutları ve Filtresi
     application.add_handler(CommandHandler("stickerengelle", sticker_engelle_command))
     application.add_handler(CommandHandler("engellistickerlar", engelli_stickerlar_command))
     application.add_handler(CommandHandler("stickerserbest", sticker_serbest_command))
