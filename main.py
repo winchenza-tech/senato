@@ -172,7 +172,7 @@ async def oynat_command(update, context):
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.post("https://apicobalt.mgytr.top", json=payload, headers=headers) as resp:
+            async with session.post("https://apicobalt.mgytr.top/", json=payload, headers=headers) as resp:
                 data = await resp.json()
 
         if data.get("status") in ["tunnel", "redirect"] and data.get("url"):
