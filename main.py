@@ -221,7 +221,7 @@ async def summarize_command(update, context):
     Aşağıdaki konuşmaları çok akıcı, sürükleyici bir hikaye anlatıcısı (storyteller) edasıyla özetle.
     
     Özel kurallar:
-    1: Özet tam olarak 3 paragrafa bölünmüş olmalı. 
+    1: Özet tam olarak 3 paragrafa bölünmüş olmalı. TOPLAM özet maksimum 110 kelime, HER BİR paragraf ise maksimum 35 kelime olmalıdır. 
     2: Hikayeyi anlatırken, aralarda sohbet eden kişilere fena halde, sivri dilli bir şekilde laf sokmayı ve eleştirmeyi unutma.
     3: Hiçbir sözünü sakınma, en ağır eleştirileri yap. Hata veya saçmalıklarını yüzlerine vur, kimseyi kayırma.
     4: Özet içerisinde asla * (yıldız) işareti kullanma.
