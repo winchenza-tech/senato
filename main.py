@@ -51,6 +51,7 @@ STICKER_ADMINS = [652932220, 7094870780]
 blocked_stickers_list = []
 
 UNAUTHORIZED_IMAGE_URL = "https://i.ibb.co/bgq1t0kp/MG-8928.jpg"
+SORU_BANNER_URL = "https://i.ibb.co/VcTxzB5Z/MG-2510.jpg"
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -59,6 +60,9 @@ message_id_cache = {}
 last_usage = {}
 COOLDOWN_MINUTES = 10
 pending_replies = {}
+
+# Yeni eklenen: Özel mesaj spam sayacı
+dm_error_counts = {}
 
 # --- QUİZ OYUN DURUMU ---
 QUIZ_STATE = {
@@ -97,6 +101,21 @@ async def safe_generate(contents, config=None, retries=5):
 
 async def reject_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message: return
+    
+    user_id = update.effective_user.id
+    
+    # Yeni Özellik: Spam yapanları engelleme
+    dm_error_counts[user_id] = dm_error_counts.get(user_id, 0) + 1
+    
+    if dm_error_counts[user_id] > 4:
+        return # 4'ten büyükse tamamen görmezden gel
+    elif dm_error_counts[user_id] == 4:
+        try:
+            await update.effective_message.reply_text("⛔ 3'ten fazla hata aldığın için bot artık mesajlarını görmezden geliyor.")
+        except:
+            pass
+        return
+        
     try:
         await update.effective_message.reply_photo(
             photo=UNAUTHORIZED_IMAGE_URL,
@@ -148,6 +167,50 @@ async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def announce_command(update, context):
     if update.effective_user.id in ALLOWED_USERS and context.args:
         await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"📢 {' '.join(context.args)}")
+
+# --- YENİ EKLENEN: /soru KOMUTU ---
+async def soru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
+    
+    question_text = " ".join(context.args) if context.args else ""
+    quoted_text = ""
+    
+    # Alıntı yapılan mesaj varsa al
+    if update.message.reply_to_message:
+        target = update.message.reply_to_message
+        quoted_text = target.text or target.caption or ""
+        
+    # Yanlış kullanım kontrolü
+    if not question_text and not quoted_text:
+        await update.message.reply_text("/Soru yazdıktan sonra google gibi kullan işte")
+        return
+        
+    prompt = (f"Kullanıcının sorusu: '{question_text}'. "
+              f"Eğer varsa sorunun sorulduğu alıntılanan metin: '{quoted_text}'. "
+              f"GÖREVİN: Bu soruyu maksimum 20 kelime kullanarak yanıtla. "
+              f"Akıcı ve gündelik bir dil kullan. Eğer soru çok basit, anlamsız veya saçmaysa cevabı verirken kullanıcıyı aşağıla ve dalga geç. "
+              f"Alıntılanan metin varsa, soruyu o metne göre değerlendirerek cevapla.")
+              
+    try:
+        res = await safe_generate(
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                safety_settings=[
+                    types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+                ]
+            )
+        )
+        
+        await update.message.reply_photo(
+            photo=SORU_BANNER_URL,
+            caption=res.text,
+            reply_to_message_id=update.message.message_id
+        )
+    except Exception as e: 
+        print(f"Soru komutu hatası: {e}")
 
 async def comment_command(update, context):
     """ /yorumla komutu """
@@ -553,6 +616,9 @@ async def main():
     application.add_handler(CommandHandler("duyuru", announce_command))
     application.add_handler(CommandHandler("yorumla", comment_command))
     application.add_handler(CommandHandler("tarotbak", tarot_command))
+    
+    # YENİ EKLENEN: /soru komutu eklemesi
+    application.add_handler(CommandHandler("soru", soru_command))
     
     application.add_handler(CommandHandler("getir", getir_command))
     application.add_handler(CommandHandler("yanitla", admin_text_reply))
